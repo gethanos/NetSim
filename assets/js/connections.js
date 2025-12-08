@@ -24,7 +24,7 @@
 
 import { areInSameNetwork, isValidIP } from './network-core.js';
 
-// Διαχείριση συνδέσεων - ΠΛΗΡΩΣ ΔΙΟΡΘΩΜΕΝΗ
+// Διαχείριση συνδέσεων - ΠΛΗΡΩΣ ΔΙΟΡΘΩΜΕΝΗ ΜΕ INTERNET ACCESS
 class ConnectionManager {
     constructor() {
         this.connections = [];
@@ -33,7 +33,77 @@ class ConnectionManager {
         this.packetInterval = null;
     }
     
-    // Δημιουργία νέας σύνδεσης - ΔΙΟΡΘΩΜΕΝΗ
+    // ==================== ΒΟΗΘΗΤΙΚΕΣ ΣΥΝΑΡΤΗΣΕΙΣ ====================
+    
+    // Λήψη IP συσκευής (λειτουργεί και για routers)
+    getDeviceIP(device) {
+        if (!device) return null;
+        if (device.type === 'router') {
+            return device.interfaces?.lan?.ip || device.interfaces?.wan?.ip;
+        }
+        return device.ip;
+    }
+    
+    // Λήψη μάσκας υποδικτύου συσκευής
+    getDeviceSubnet(device) {
+        if (!device) return '255.255.255.0';
+        if (device.type === 'router') {
+            return device.interfaces?.lan?.subnetMask || device.interfaces?.wan?.subnetMask || '255.255.255.0';
+        }
+        return device.subnetMask || '255.255.255.0';
+    }
+    
+    // Λήψη gateway συσκευής
+    getDeviceGateway(device) {
+        if (!device) return null;
+        if (device.type === 'router') {
+            return device.interfaces?.wan?.gateway;
+        }
+        return device.gateway;
+    }
+    
+    // Λήψη DNS συσκευής
+    getDeviceDNS(device) {
+        if (!device) return [];
+        if (device.type === 'router') {
+            return device.interfaces?.lan?.dns || device.interfaces?.wan?.dns || [];
+        }
+        return device.dns || [];
+    }
+    
+    // Έλεγχος αν το IP είναι εξωτερικό (Internet)
+    isExternalIP(ip) {
+        if (!ip || ip === 'N/A') return false;
+        
+        // Εσωτερικές IP ranges (όχι σε αυτά τα ranges = εξωτερικό)
+        const privateRanges = [
+            /^10\./,                        // 10.0.0.0/8
+            /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+            /^192\.168\./,                  // 192.168.0.0/16
+            /^127\./,                       // Loopback
+            /^169\.254\./,                  // Link-local
+            /^203\.0\.113\./                // TEST-NET-3
+        ];
+        
+        // Αν δεν είναι εσωτερικό, είναι εξωτερικό
+        const isPrivate = privateRanges.some(regex => regex.test(ip));
+        return !isPrivate;
+    }
+    
+    // Έλεγχος αν ο router έχει πρόσβαση στο Internet
+    routerHasInternetAccess(router) {
+        if (!router || router.type !== 'router') return false;
+        
+        const wanIP = router.interfaces?.wan?.ip;
+        const wanGateway = router.interfaces?.wan?.gateway;
+        
+        return wanIP && wanIP !== 'N/A' && wanIP !== '0.0.0.0' &&
+               wanGateway && wanGateway !== '0.0.0.0' && wanGateway !== 'N/A';
+    }
+    
+    // ==================== ΚΥΡΙΕΣ ΜΕΘΟΔΟΙ ====================
+    
+    // Δημιουργία νέας σύνδεσης
     createConnection(device1, device2) {
         // Έλεγχος για ύπαρξη σύνδεσης
         const existingConnection = this.connections.find(conn => 
@@ -42,7 +112,7 @@ class ConnectionManager {
         );
         
         if (existingConnection) {
-            console.log(`[CONNECTION INFO] Οι συσκευές ${device1.name} και ${device2.name} είναι ήδη συνδεδεμένες`);
+            console.log(`[ΣΥΝΔΕΣΗ] Οι συσκευές ${device1.name} και ${device2.name} είναι ήδη συνδεδεμένες`);
             return existingConnection;
         }
         
@@ -58,13 +128,13 @@ class ConnectionManager {
         
         this.connections.push(connection);
         
-        // ΔΙΟΡΘΩΣΗ: Βεβαιώνουμε ότι υπάρχουν τα connections arrays
+        // ΔΙΟΡΘΩΣΗ: Βεβαιώνουμε ότι υπάρχουν τα arrays συνδέσεων
         if (!device1.connections) {
-            console.log(`[CONNECTION FIX] Creating connections array for ${device1.name}`);
+            console.log(`[ΔΙΟΡΘΩΣΗ] Δημιουργία array συνδέσεων για ${device1.name}`);
             device1.connections = [];
         }
         if (!device2.connections) {
-            console.log(`[CONNECTION FIX] Creating connections array for ${device2.name}`);
+            console.log(`[ΔΙΟΡΘΩΣΗ] Δημιουργία array συνδέσεων για ${device2.name}`);
             device2.connections = [];
         }
         
@@ -72,7 +142,7 @@ class ConnectionManager {
         device1.connections.push(connectionId);
         device2.connections.push(connectionId);
         
-        console.log(`[CONNECTION CREATED] ${device1.name} ↔ ${device2.name}`);
+        console.log(`[ΣΥΝΔΕΣΗ ΔΗΜΙΟΥΡΓΗΘΗΚΕ] ${device1.name} ↔ ${device2.name}`);
         
         return connection;
     }
@@ -100,7 +170,7 @@ class ConnectionManager {
         const connIndex = this.connections.indexOf(connection);
         if (connIndex !== -1) this.connections.splice(connIndex, 1);
         
-        console.log(`[CONNECTION REMOVED] ${connection.id}`);
+        console.log(`[ΣΥΝΔΕΣΗ ΔΙΑΓΡΑΦΗΚΕ] ${connection.id}`);
         return connection;
     }
     
@@ -115,12 +185,12 @@ class ConnectionManager {
     
     // Ενημέρωση όλων των συνδέσεων
     updateAllConnections(devices) {
-        console.log(`[UPDATE CONNECTIONS] Total connections: ${this.connections.length}`);
+        console.log(`[ΕΝΗΜΕΡΩΣΗ ΣΥΝΔΕΣΕΩΝ] Σύνολο συνδέσεων: ${this.connections.length}`);
         
-        // ΔΙΟΡΘΩΣΗ: Επαναφορά connections arrays αν λείπουν
+        // ΔΙΟΡΘΩΣΗ: Επαναφορά arrays συνδέσεων αν λείπουν
         devices.forEach(device => {
             if (!device.connections) {
-                console.log(`[UPDATE FIX] Creating connections array for ${device.name}`);
+                console.log(`[ΕΝΗΜΕΡΩΣΗ] Δημιουργία array συνδέσεων για ${device.name}`);
                 device.connections = [];
             }
         });
@@ -178,9 +248,9 @@ class ConnectionManager {
         });
     }
     
-    // Έλεγχος επικοινωνίας μεταξύ συσκευών - ΔΙΟΡΘΩΜΕΝΗ ΜΕ DEBUG
+    // Έλεγχος επικοινωνίας μεταξύ συσκευών - ΔΙΟΡΘΩΜΕΝΗ ΜΕ INTERNET ACCESS
     canDevicesCommunicateDirectly(device1, device2) {
-        console.log(`[DIRECT COMM DEBUG] ${device1.name} ↔ ${device2.name}`);
+        console.log(`[ΕΠΙΚΟΙΝΩΝΙΑ] Έλεγχος: ${device1.name} ↔ ${device2.name}`);
         
         if (device1.id === device2.id) {
             return { canCommunicate: true, viaGateway: false };
@@ -188,7 +258,7 @@ class ConnectionManager {
         
         // ΕΛΕΓΧΟΣ: Αν είναι συνδεδεμένοι μέσω switch
         if (this.areDevicesConnectedViaSwitch(device1, device2)) {
-            console.log(`[DIRECT COMM DEBUG] Connected via switch`);
+            console.log(`[ΕΠΙΚΟΙΝΩΝΙΑ] Συνδεδεμένοι μέσω switch`);
             
             // Αν και οι δύο είναι switches, απλή σύνδεση
             if (device1.type === 'switch' && device2.type === 'switch') {
@@ -202,16 +272,29 @@ class ConnectionManager {
             }
             
             // Για συσκευές με IP που είναι συνδεδεμένες μέσω switch
-            // Πρέπει να ελέγξουμε αν μπορούν να επικοινωνήσουν (ίδιο δίκτυο ή gateway)
             return this.checkCommunicationThroughSwitch(device1, device2);
         }
         
         if (!this.areDevicesConnected(device1, device2)) {
-            console.log(`[DIRECT COMM DEBUG] ${device1.name} and ${device2.name} are not physically connected`);
+            console.log(`[ΕΠΙΚΟΙΝΩΝΙΑ] Οι συσκευές ${device1.name} και ${device2.name} δεν είναι φυσικά συνδεδεμένες`);
             return { canCommunicate: false, viaGateway: false };
         }
         
-        // Router logic
+        // ΝΕΟ: Έλεγχος για εξωτερικές IP (Internet)
+        const device1IP = this.getDeviceIP(device1);
+        const device2IP = this.getDeviceIP(device2);
+        
+        if (this.isExternalIP(device2IP) && device1.type !== 'router') {
+            console.log(`[ΕΠΙΚΟΙΝΩΝΙΑ] Το ${device2IP} είναι εξωτερικό IP, αλλά η ${device1.name} δεν είναι router`);
+            return { canCommunicate: false, viaGateway: false };
+        }
+        
+        if (this.isExternalIP(device1IP) && device2.type !== 'router') {
+            console.log(`[ΕΠΙΚΟΙΝΩΝΙΑ] Το ${device1IP} είναι εξωτερικό IP, αλλά η ${device2.name} δεν είναι router`);
+            return { canCommunicate: false, viaGateway: false };
+        }
+        
+        // Λογική για routers
         if (device1.type === 'router') {
             return this.canCommunicateWithRouter(device1, device2);
         }
@@ -219,35 +302,44 @@ class ConnectionManager {
             return this.canCommunicateWithRouter(device2, device1);
         }
         
-        // Standard devices with IP
+        // Τυπικές συσκευές με IP
         return this.canStandardDevicesCommunicate(device1, device2);
     }
     
-    // ΝΕΑ ΜΕΘΟΔΟΣ: Έλεγχος επικοινωνίας μέσω switch
+    // Έλεγχος επικοινωνίας μέσω switch
     checkCommunicationThroughSwitch(device1, device2) {
-        console.log(`[SWITCH COMM] ${device1.name} ↔ ${device2.name} via switch`);
+        console.log(`[SWITCH] Επικοινωνία: ${device1.name} ↔ ${device2.name} μέσω switch`);
         
+        const ip1 = this.getDeviceIP(device1);
+        const ip2 = this.getDeviceIP(device2);
+    
         // Αν δεν έχουν IP, δεν μπορούν να επικοινωνήσουν
-        if ((!device1.ip || device1.ip === 'N/A' || device1.ip === '0.0.0.0' || device1.ip === undefined) ||
-            (!device2.ip || device2.ip === 'N/A' || device2.ip === '0.0.0.0' || device2.ip === undefined)) {
-            console.log(`[SWITCH COMM] One or both devices missing IP`);
+        if ((!ip1 || ip1 === 'N/A' || ip1 === '0.0.0.0' || ip1 === undefined) ||
+            (!ip2 || ip2 === 'N/A' || ip2 === '0.0.0.0' || ip2 === undefined)) {
+            console.log(`[SWITCH] Μία ή και οι δύο συσκευές δεν έχουν IP: ${ip1}, ${ip2}`);
             return { canCommunicate: false, viaGateway: false };
-        }
-        
+        }        
+    
+        const subnet1 = this.getDeviceSubnet(device1);
+        const subnet2 = this.getDeviceSubnet(device2);
+    
         // Έλεγχος αν είναι στο ίδιο δίκτυο
-        console.log(`[SWITCH COMM] Checking same network: ${device1.ip}/${device1.subnetMask} vs ${device2.ip}/${device2.subnetMask}`);
-        if (areInSameNetwork(device1.ip, device2.ip, device1.subnetMask, device2.subnetMask)) {
-            console.log(`[SWITCH COMM] Same network! Communication possible via switch`);
+        console.log(`[SWITCH] Έλεγχος ίδιου δικτύου: ${ip1}/${subnet1} vs ${ip2}/${subnet2}`);
+        if (areInSameNetwork(ip1, ip2, subnet1, subnet2)) {
+            console.log(`[SWITCH] Ίδιο δίκτυο! Επικοινωνία δυνατή μέσω switch`);
             return { canCommunicate: true, viaGateway: false };
         }
         
         // Αν είναι σε διαφορετικά δίκτυα, πρέπει να έχουν gateway
-        console.log(`[SWITCH COMM] Different networks. Checking for gateway...`);
+        console.log(`[SWITCH] Διαφορετικά δίκτυα. Έλεγχος για gateway...`);
         
         // Αν ΟΥΤΕ ΜΙΑ από τις συσκευές έχει gateway, ΔΕΝ μπορούν να επικοινωνήσουν
-        if ((!device1.gateway || device1.gateway === '0.0.0.0' || device1.gateway === 'N/A') &&
-            (!device2.gateway || device2.gateway === '0.0.0.0' || device2.gateway === 'N/A')) {
-            console.log(`[SWITCH COMM] NO GATEWAY configured. Communication impossible between different networks`);
+        const gateway1 = this.getDeviceGateway(device1);
+        const gateway2 = this.getDeviceGateway(device2);
+        
+        if ((!gateway1 || gateway1 === '0.0.0.0' || gateway1 === 'N/A') &&
+            (!gateway2 || gateway2 === '0.0.0.0' || gateway2 === 'N/A')) {
+            console.log(`[SWITCH] ΔΕΝ έχει ρυθμιστεί GATEWAY. Επικοινωνία αδύνατη μεταξύ διαφορετικών δικτύων`);
             return { canCommunicate: false, viaGateway: false };
         }
         
@@ -255,7 +347,7 @@ class ConnectionManager {
         return this.checkGatewayCommunication(device1, device2);
     }
     
-    // ΝΕΑ ΜΕΘΟΔΟΣ: Έλεγχος αν δύο συσκευές είναι συνδεδεμένες μέσω switch
+    // Έλεγχος αν δύο συσκευές είναι συνδεδεμένες μέσω switch
     areDevicesConnectedViaSwitch(device1, device2) {
         // Βρες όλες τις συσκευές που συνδέουν τις δύο συσκευές
         const path = this.findPathBetweenDevices(device1, device2);
@@ -267,7 +359,7 @@ class ConnectionManager {
         // Έλεγχος αν υπάρχει switch στη διαδρομή (εκτός από τις άκρες)
         for (let i = 1; i < path.length - 1; i++) {
             if (path[i].type === 'switch') {
-                console.log(`[VIA SWITCH] ${device1.name} ↔ ${device2.name} via ${path[i].name}`);
+                console.log(`[ΜΕΣΩ SWITCH] ${device1.name} ↔ ${device2.name} μέσω ${path[i].name}`);
                 return true;
             }
         }
@@ -275,57 +367,67 @@ class ConnectionManager {
         return false;
     }
     
-    // Έλεγχος επικοινωνίας τυπικών συσκευών - ΔΙΟΡΘΩΜΕΝΗ
+    // Έλεγχος επικοινωνίας τυπικών συσκευών
     canStandardDevicesCommunicate(device1, device2) {
-        console.log(`[STANDARD COMM] ${device1.name} (${device1.ip}) ↔ ${device2.name} (${device2.ip})`);
+        console.log(`[ΤΥΠΙΚΗ ΕΠΙΚΟΙΝΩΝΙΑ] ${device1.name} ↔ ${device2.name}`);
+        
+        const ip1 = this.getDeviceIP(device1);
+        const ip2 = this.getDeviceIP(device2);
         
         // Αν δεν έχουν IP, δεν μπορούν να επικοινωνήσουν
-        if ((!device1.ip || device1.ip === 'N/A' || device1.ip === '0.0.0.0' || device1.ip === undefined) ||
-            (!device2.ip || device2.ip === 'N/A' || device2.ip === '0.0.0.0' || device2.ip === undefined)) {
-            console.log(`[STANDARD COMM] One or both devices missing IP`);
+        if ((!ip1 || ip1 === 'N/A' || ip1 === '0.0.0.0' || ip1 === undefined) ||
+            (!ip2 || ip2 === 'N/A' || ip2 === '0.0.0.0' || ip2 === undefined)) {
+            console.log(`[ΤΥΠΙΚΗ ΕΠΙΚΟΙΝΩΝΙΑ] Μία ή και οι δύο συσκευές δεν έχουν IP`);
             return { canCommunicate: false, viaGateway: false };
         }
         
         // Έλεγχος αν είναι στο ίδιο δίκτυο
-        console.log(`[STANDARD COMM] Checking same network: ${device1.ip}/${device1.subnetMask} vs ${device2.ip}/${device2.subnetMask}`);
-        if (areInSameNetwork(device1.ip, device2.ip, device1.subnetMask, device2.subnetMask)) {
-            console.log(`[STANDARD COMM] Same network! Direct communication possible`);
+        const subnet1 = this.getDeviceSubnet(device1);
+        const subnet2 = this.getDeviceSubnet(device2);
+        
+        console.log(`[ΤΥΠΙΚΗ ΕΠΙΚΟΙΝΩΝΙΑ] Έλεγχος ίδιου δικτύου: ${ip1}/${subnet1} vs ${ip2}/${subnet2}`);
+        if (areInSameNetwork(ip1, ip2, subnet1, subnet2)) {
+            console.log(`[ΤΥΠΙΚΗ ΕΠΙΚΟΙΝΩΝΙΑ] Ίδιο δίκτυο! Άμεση επικοινωνία δυνατή`);
             return { canCommunicate: true, viaGateway: false };
         }
         
         // ΔΙΟΡΘΩΣΗ: Αν είναι σε διαφορετικά δίκτυα, πρέπει να έχουν gateway
-        console.log(`[STANDARD COMM] Different networks. Checking for gateway...`);
+        console.log(`[ΤΥΠΙΚΗ ΕΠΙΚΟΙΝΩΝΙΑ] Διαφορετικά δίκτυα. Έλεγχος για gateway...`);
         
         // Αν ΟΥΤΕ ΜΙΑ από τις συσκευές έχει gateway, ΔΕΝ μπορούν να επικοινωνήσουν
-        if ((!device1.gateway || device1.gateway === '0.0.0.0' || device1.gateway === 'N/A') &&
-            (!device2.gateway || device2.gateway === '0.0.0.0' || device2.gateway === 'N/A')) {
-            console.log(`[STANDARD COMM] NO GATEWAY configured. Communication impossible between different networks`);
+        const gateway1 = this.getDeviceGateway(device1);
+        const gateway2 = this.getDeviceGateway(device2);
+        
+        if ((!gateway1 || gateway1 === '0.0.0.0' || gateway1 === 'N/A') &&
+            (!gateway2 || gateway2 === '0.0.0.0' || gateway2 === 'N/A')) {
+            console.log(`[ΤΥΠΙΚΗ ΕΠΙΚΟΙΝΩΝΙΑ] ΔΕΝ έχει ρυθμιστεί GATEWAY. Επικοινωνία αδύνατη μεταξύ διαφορετικών δικτύων`);
             return { canCommunicate: false, viaGateway: false };
         }
         
         // Έλεγχος για gateway
-        console.log(`[STANDARD COMM] Checking gateway communication...`);
+        console.log(`[ΤΥΠΙΚΗ ΕΠΙΚΟΙΝΩΝΙΑ] Έλεγχος επικοινωνίας μέσω gateway...`);
         return this.checkGatewayCommunication(device1, device2);
     }
     
     // Έλεγχος επικοινωνίας μέσω gateway
     checkGatewayCommunication(device1, device2) {
-        console.log(`[GATEWAY CHECK] ${device1.name} → ${device2.name}`);
+        console.log(`[GATEWAY] Έλεγχος: ${device1.name} → ${device2.name}`);
         
         // Έλεγχος αν η device1 έχει gateway και μπορεί να φτάσει στη device2
-        if (device1.gateway && device1.gateway !== '0.0.0.0' && device1.gateway !== 'N/A') {
-            console.log(`[GATEWAY CHECK] ${device1.name} has gateway: ${device1.gateway}`);
-            const gatewayDevice = window.deviceManager.getDeviceByIP(device1.gateway);
+        const gateway1 = this.getDeviceGateway(device1);
+        if (gateway1 && gateway1 !== '0.0.0.0' && gateway1 !== 'N/A') {
+            console.log(`[GATEWAY] Η ${device1.name} έχει gateway: ${gateway1}`);
+            const gatewayDevice = window.deviceManager.getDeviceByIP(gateway1);
             
             if (gatewayDevice) {
-                console.log(`[GATEWAY CHECK] Gateway device found: ${gatewayDevice.name}`);
+                console.log(`[GATEWAY] Βρέθηκε συσκευή gateway: ${gatewayDevice.name}`);
                 
                 // Έλεγχος αν υπάρχει διαδρομή προς το gateway (άμεσα ή μέσω switch)
                 if (this.areDevicesConnected(device1, gatewayDevice) || this.areDevicesConnectedViaSwitch(device1, gatewayDevice)) {
-                    console.log(`[GATEWAY CHECK] ${device1.name} connected to gateway`);
+                    console.log(`[GATEWAY] Η ${device1.name} είναι συνδεδεμένη με το gateway`);
                     const gatewayComm = this.canDevicesCommunicateDirectly(gatewayDevice, device2);
                     if (gatewayComm.canCommunicate) {
-                        console.log(`[GATEWAY CHECK] Gateway can reach target`);
+                        console.log(`[GATEWAY] Το gateway μπορεί να φτάσει στον προορισμό`);
                         return { canCommunicate: true, viaGateway: true };
                     }
                 }
@@ -333,107 +435,220 @@ class ConnectionManager {
         }
         
         // Έλεγχος αν η device2 έχει gateway και μπορεί να φτάσει στη device1
-        if (device2.gateway && device2.gateway !== '0.0.0.0' && device2.gateway !== 'N/A') {
-            console.log(`[GATEWAY CHECK] ${device2.name} has gateway: ${device2.gateway}`);
-            const gatewayDevice = window.deviceManager.getDeviceByIP(device2.gateway);
+        const gateway2 = this.getDeviceGateway(device2);
+        if (gateway2 && gateway2 !== '0.0.0.0' && gateway2 !== 'N/A') {
+            console.log(`[GATEWAY] Η ${device2.name} έχει gateway: ${gateway2}`);
+            const gatewayDevice = window.deviceManager.getDeviceByIP(gateway2);
             
             if (gatewayDevice) {
-                console.log(`[GATEWAY CHECK] Gateway device found: ${gatewayDevice.name}`);
+                console.log(`[GATEWAY] Βρέθηκε συσκευή gateway: ${gatewayDevice.name}`);
                 
                 // Έλεγχος αν υπάρχει διαδρομή προς το gateway (άμεσα ή μέσω switch)
                 if (this.areDevicesConnected(device2, gatewayDevice) || this.areDevicesConnectedViaSwitch(device2, gatewayDevice)) {
-                    console.log(`[GATEWAY CHECK] ${device2.name} connected to gateway`);
+                    console.log(`[GATEWAY] Η ${device2.name} είναι συνδεδεμένη με το gateway`);
                     const gatewayComm = this.canDevicesCommunicateDirectly(device1, gatewayDevice);
                     if (gatewayComm.canCommunicate) {
-                        console.log(`[GATEWAY CHECK] Gateway can reach source`);
+                        console.log(`[GATEWAY] Το gateway μπορεί να φτάσει στην πηγή`);
                         return { canCommunicate: true, viaGateway: true };
                     }
                 }
             }
         }
         
-        console.log(`[GATEWAY CHECK] No gateway communication possible`);
+        console.log(`[GATEWAY] Καμία επικοινωνία μέσω gateway δεν είναι δυνατή`);
         return { canCommunicate: false, viaGateway: false };
     }
     
-    // Έλεγχος επικοινωνίας με router - ΔΙΟΡΘΩΜΕΝΗ ΜΕ DEBUG
-    canCommunicateWithRouter(router, otherDevice) {
-        console.log(`[ROUTER COMM] ${router.name} ↔ ${otherDevice.name}`);
-        console.log(`[ROUTER COMM] Router WAN: ${router.interfaces.wan.ip}, LAN: ${router.interfaces.lan.ip}`);
-        console.log(`[ROUTER COMM] Other: ${otherDevice.name} (${otherDevice.type}), IP: ${otherDevice.ip}`);
+// Έλεγχος επικοινωνίας με router
+canCommunicateWithRouter(router, otherDevice) {
+    console.log(`[ROUTER] Επικοινωνία: ${router.name} ↔ ${otherDevice.name}`);
+    console.log(`[ROUTER] Router WAN: ${router.interfaces.wan.ip}, LAN: ${router.interfaces.lan.ip}`);
+    
+    const otherDeviceIP = this.getDeviceIP(otherDevice);
+    console.log(`[ROUTER] Άλλη συσκευή: ${otherDevice.name} (${otherDevice.type}), IP: ${otherDeviceIP}`);
+    
+    // 1. Router ↔ Switch (χωρίς IP) - φυσική σύνδεση
+    if (otherDevice.type === 'switch' && otherDevice.ip === 'N/A') {
+        console.log(`[ROUTER] Άμεση σύνδεση με switch`);
+        return { canCommunicate: true, viaGateway: false };
+    }
+    
+    // 2. ΆΜΕΣΗ ΣΥΝΔΕΣΗ: Αν ο router και ο προορισμός είναι συνδεδεμένοι άμεσα
+    if (this.areDevicesConnected(router, otherDevice)) {
+        console.log(`[ROUTER] ΆΜΕΣΗ ΣΥΝΔΕΣΗ με ${otherDevice.name}`);
         
-        // Router ↔ Switch (χωρίς IP) - φυσική σύνδεση
-        if (otherDevice.type === 'switch' && otherDevice.ip === 'N/A') {
-            console.log(`[ROUTER COMM] Direct connection to switch`);
+        // Αν ο προορισμός είναι Cloud ή Router, επικοινωνία ΔΥΝΑΤΗ
+        if (otherDevice.type === 'cloud' || otherDevice.type === 'router') {
+            console.log(`[ROUTER] Άμεση σύνδεση Cloud/Router, επικοινωνία ΔΥΝΑΤΗ`);
             return { canCommunicate: true, viaGateway: false };
         }
         
-        // Έλεγχος αν το router έχει valid LAN IP
-        const routerLanIP = router.interfaces.lan.ip;
-        if (!routerLanIP || routerLanIP === 'N/A' || routerLanIP === '0.0.0.0' || routerLanIP === undefined) {
-            console.log(`[ROUTER COMM] Router has no valid LAN IP`);
-            return { canCommunicate: false, viaGateway: false };
-        }
-        
-        // Έλεγχος αν η συσκευή είναι στο LAN του router
-        if (otherDevice.ip && otherDevice.ip !== 'N/A' && otherDevice.ip !== '0.0.0.0' && otherDevice.ip !== undefined) {
-            console.log(`[ROUTER COMM] Checking if ${otherDevice.ip} is in same network as router LAN ${routerLanIP}`);
+        // Αν ο προορισμός έχει IP, έλεγχος αν είναι στο ίδιο subnet
+        if (otherDeviceIP && otherDeviceIP !== 'N/A') {
+            const routerSubnet = router.interfaces.lan.subnetMask;
+            const otherSubnet = this.getDeviceSubnet(otherDevice);
             
-            if (areInSameNetwork(otherDevice.ip, routerLanIP, 
-                                otherDevice.subnetMask, router.interfaces.lan.subnetMask)) {
-                console.log(`[ROUTER COMM] Device is in router's LAN`);
+            // Ειδική περίπτωση: Router ↔ Cloud με διαφορετικά IP
+            if (otherDevice.type === 'cloud') {
+                console.log(`[ROUTER] Άμεση σύνδεση με Cloud, αποδέχομαι επικοινωνία`);
                 return { canCommunicate: true, viaGateway: false };
             }
         }
-        
-        // Έλεγχος αν η συσκευή έχει ως gateway το router LAN
-        if (otherDevice.gateway && otherDevice.gateway !== '0.0.0.0' && otherDevice.gateway !== 'N/A') {
-            console.log(`[ROUTER COMM] Device gateway: ${otherDevice.gateway}, Router LAN: ${routerLanIP}`);
-            if (otherDevice.gateway === routerLanIP) {
-                console.log(`[ROUTER COMM] Device uses router as gateway`);
-                
-                // Έλεγχος αν το router γνωρίζει τον προορισμό (routes)
-                if (router.routingTable && router.routingTable.length > 0) {
-                    // Απλοποιημένος έλεγχος routing table
-                    const targetNetwork = this.getNetworkAddress(otherDevice.ip, otherDevice.subnetMask);
-                    const hasRoute = router.routingTable.some(route => 
-                        this.isIPInNetwork(otherDevice.ip, route.network, route.mask)
-                    );
-                    
-                    if (hasRoute) {
-                        console.log(`[ROUTER COMM] Router has route to ${otherDevice.ip}`);
-                        return { canCommunicate: true, viaGateway: true };
-                    } else {
-                        console.log(`[ROUTER COMM] Router has NO route to ${otherDevice.ip}`);
-                        return { canCommunicate: false, viaGateway: false };
-                    }
-                }
-                
-                return { canCommunicate: true, viaGateway: true };
-            }
-        }
-        
-        // Έλεγχος για WAN communication (Cloud ↔ Router)
-        if (otherDevice.type === 'cloud' || otherDevice.type === 'router') {
-            const routerWanIP = router.interfaces.wan.ip;
-            if (routerWanIP && routerWanIP !== 'N/A' && routerWanIP !== '0.0.0.0' && routerWanIP !== undefined) {
-                if (otherDevice.ip && areInSameNetwork(otherDevice.ip, routerWanIP, 
-                                                     otherDevice.subnetMask, router.interfaces.wan.subnetMask)) {
-                    console.log(`[ROUTER COMM] WAN communication with ${otherDevice.name}`);
-                    return { canCommunicate: true, viaGateway: false };
-                }
-            }
-        }
-        
-        console.log(`[ROUTER COMM] No communication possible`);
+    }
+    
+    // Έλεγχος αν το router έχει έγκυρο LAN IP
+    const routerLanIP = router.interfaces.lan.ip;
+    if (!routerLanIP || routerLanIP === 'N/A' || routerLanIP === '0.0.0.0' || routerLanIP === undefined) {
+        console.log(`[ROUTER] Το router δεν έχει έγκυρο LAN IP`);
         return { canCommunicate: false, viaGateway: false };
     }
+    
+    // Έλεγχος αν η συσκευή είναι στο LAN του router
+    if (otherDeviceIP && otherDeviceIP !== 'N/A' && otherDeviceIP !== '0.0.0.0' && otherDeviceIP !== undefined) {
+        console.log(`[ROUTER] Έλεγχος αν το ${otherDeviceIP} είναι στο ίδιο δίκτυο με το router LAN ${routerLanIP}`);
+        
+        const routerSubnet = router.interfaces.lan.subnetMask;
+        const otherSubnet = this.getDeviceSubnet(otherDevice);
+        
+        if (areInSameNetwork(otherDeviceIP, routerLanIP, otherSubnet, routerSubnet)) {
+            console.log(`[ROUTER] Η συσκευή είναι στο LAN του router`);
+            return { canCommunicate: true, viaGateway: false };
+        }
+        
+        // ΝΕΟ: Έλεγχος για εξωτερικές IP (Internet access)
+        if (this.isExternalIP(otherDeviceIP)) {
+            console.log(`[ROUTER] Το ${otherDeviceIP} είναι ΕΞΩΤΕΡΙΚΟ IP (Internet)`);
+            
+            // 3. Έλεγχος αν το router είναι ΣΥΝΔΕΔΕΜΕΝΟ με τον προορισμό
+            // Αναζήτηση ΌΛΩΝ των routers στο δίκτυο
+            const allRouters = window.deviceManager.devices.filter(d => d.type === 'router');
+            
+            console.log(`[ROUTER] Αναζήτηση σε ${allRouters.length} routers για σύνδεση με ${otherDevice.name}`);
+            
+            for (const someRouter of allRouters) {
+                // Έλεγχος αν ο άλλος router είναι ΣΥΝΔΕΔΕΜΕΝΟΣ με τον προορισμό
+                if (this.areDevicesConnected(someRouter, otherDevice)) {
+                    console.log(`[ROUTER] Το ${otherDevice.name} είναι ΣΥΝΔΕΔΕΜΕΝΟ με ${someRouter.name}`);
+                    
+                    // Έλεγχος αν υπάρχει διαδρομή από τον τρέχοντα router προς εκείνον
+                    if (someRouter.id === router.id) {
+                        console.log(`[ROUTER] Είναι ο ΙΔΙΟΣ router! Άμεση σύνδεση`);
+                        return { 
+                            canCommunicate: true, 
+                            viaGateway: false,
+                            directConnection: true 
+                        };
+                    }
+                    
+                    const pathToOtherRouter = this.findPathBetweenDevices(router, someRouter);
+                    if (pathToOtherRouter) {
+                        console.log(`[ROUTER] Υπάρχει διαδρομή προς τον router με τον προορισμό: ${pathToOtherRouter.map(d => d.name).join(' → ')}`);
+                        return { 
+                            canCommunicate: true, 
+                            viaGateway: true,
+                            externalTarget: true,
+                            connectedVia: someRouter.name,
+                            path: pathToOtherRouter
+                        };
+                    }
+                }
+            }
+            
+            // 4. Έλεγχος για internet access (WAN)
+            console.log(`[ROUTER] Έλεγχος για internet access...`);
+            
+            // Έλεγχος αν το router έχει WAN και gateway
+            const routerWanIP = router.interfaces.wan.ip;
+            const routerWanGateway = router.interfaces.wan.gateway;
+            
+            console.log(`[ROUTER] Router WAN: ${routerWanIP}, Gateway: ${routerWanGateway}`);
+            
+            if (routerWanIP !== 'N/A' && routerWanGateway !== '0.0.0.0') {
+                console.log(`[ROUTER] Το router έχει πρόσβαση στο Internet`);
+                return { 
+                    canCommunicate: true, 
+                    viaGateway: true, 
+                    requiresNAT: true,
+                    externalTarget: true,
+                    internetAccess: true
+                };
+            } else {
+                // Έλεγχος για default route
+                if (router.routingTable && router.routingTable.length > 0) {
+                    const hasDefaultRoute = router.routingTable.some(route => 
+                        route.destination === '0.0.0.0/0' || route.destination === '0.0.0.0'
+                    );
+                    
+                    if (hasDefaultRoute) {
+                        console.log(`[ROUTER] Το router έχει default route`);
+                        return { 
+                            canCommunicate: true, 
+                            viaGateway: true, 
+                            requiresNAT: true,
+                            externalTarget: true,
+                            hasDefaultRoute: true
+                        };
+                    }
+                }
+            }
+            
+            console.log(`[ROUTER] Το router ΔΕΝ έχει πρόσβαση στο Internet`);
+            return { canCommunicate: false, viaGateway: false };
+        }
+    }
+    
+    // Έλεγχος αν η συσκευή έχει ως gateway το router LAN
+    const otherGateway = this.getDeviceGateway(otherDevice);
+    if (otherGateway && otherGateway !== '0.0.0.0' && otherGateway !== 'N/A') {
+        console.log(`[ROUTER] Gateway συσκευής: ${otherGateway}, Router LAN: ${routerLanIP}`);
+        if (otherGateway === routerLanIP) {
+            console.log(`[ROUTER] Η συσκευή χρησιμοποιεί το router ως gateway`);
+            
+            // Έλεγχος αν το router γνωρίζει τον προορισμό (routes)
+            if (router.routingTable && router.routingTable.length > 0) {
+                const targetNetwork = this.getNetworkAddress(otherDeviceIP, this.getDeviceSubnet(otherDevice));
+                const hasRoute = router.routingTable.some(route => 
+                    this.isIPInNetwork(otherDeviceIP, route.network, route.mask)
+                );
+                
+                if (hasRoute) {
+                    console.log(`[ROUTER] Το router έχει διαδρομή προς ${otherDeviceIP}`);
+                    return { canCommunicate: true, viaGateway: true };
+                } else {
+                    console.log(`[ROUTER] Το router ΔΕΝ έχει διαδρομή προς ${otherDeviceIP}`);
+                    return { canCommunicate: false, viaGateway: true };
+                }
+            }
+            
+            return { canCommunicate: true, viaGateway: true };
+        }
+    }
+    
+    // Έλεγχος για WAN communication (Cloud ↔ Router ή Router ↔ Router μέσω WAN)
+    if (otherDevice.type === 'cloud' || otherDevice.type === 'router') {
+        const routerWanIP = router.interfaces.wan.ip;
+        if (routerWanIP && routerWanIP !== 'N/A' && routerWanIP !== '0.0.0.0' && routerWanIP !== undefined) {
+            
+            const routerWanSubnet = router.interfaces.wan.subnetMask;
+            const otherSubnet = this.getDeviceSubnet(otherDevice);
+            
+            if (otherDeviceIP && areInSameNetwork(otherDeviceIP, routerWanIP, 
+                                                 otherSubnet, routerWanSubnet)) {
+                console.log(`[ROUTER] WAN επικοινωνία με ${otherDevice.name}`);
+                return { canCommunicate: true, viaGateway: false };
+            }
+        }
+    }
+    
+    console.log(`[ROUTER] Καμία επικοινωνία δεν είναι δυνατή`);
+    return { canCommunicate: false, viaGateway: false };
+}
     
     // Βοηθητικές συναρτήσεις
     areDevicesConnected(device1, device2) {
         // ΔΙΟΡΘΩΣΗ: Έλεγχος αν υπάρχουν τα arrays πρώτα
         if (!device1.connections || !device2.connections) {
-            console.log(`[CONNECTION WARN] Missing connections array for ${device1.name} or ${device2.name}`);
+            console.log(`[ΠΡΟΕΙΔΟΠΟΙΗΣΗ ΣΥΝΔΕΣΗΣ] Λείπουν array συνδέσεων για ${device1.name} ή ${device2.name}`);
             return false;
         }
         
@@ -442,30 +657,31 @@ class ConnectionManager {
             (conn.device1Id === device2.id && conn.device2Id === device1.id)
         );
         
-        console.log(`[ARE CONNECTED] ${device1.name} ↔ ${device2.name}: ${isConnected}`);
+        console.log(`[ΣΥΝΔΕΔΕΜΕΝΕΣ] ${device1.name} ↔ ${device2.name}: ${isConnected}`);
         return isConnected;
     }
     
     shouldUseGateway(sourceDevice, destIP, destSubnetMask = '255.255.255.0') {
-        if (!sourceDevice.gateway || sourceDevice.gateway === '0.0.0.0') {
-            return false;
-        }
+        const sourceIP = this.getDeviceIP(sourceDevice);
+        const sourceSubnet = this.getDeviceSubnet(sourceDevice);
+        
+        if (!sourceIP || sourceIP === 'N/A') return false;
         
         // Αν η πηγή και ο προορισμός είναι στο ίδιο δίκτυο, ΔΕΝ χρειάζεται gateway
-        if (areInSameNetwork(sourceDevice.ip, destIP, sourceDevice.subnetMask, destSubnetMask)) {
+        if (areInSameNetwork(sourceIP, destIP, sourceSubnet, destSubnetMask)) {
             return false;
         }
         
         return true;
     }
     
-    // Βρίσκει όλες τις συνδεδεμένες συσκευές μιας συσκευής - ΔΙΟΡΘΩΜΕΝΗ
+    // Βρίσκει όλες τις συνδεδεμένες συσκευές μιας συσκευής
     getConnectedDevices(device) {
         const connected = [];
         
         // ΔΙΟΡΘΩΣΗ: Αν λείπει το array, επέστρεψε κενό
         if (!device.connections) {
-            console.log(`[GET CONNECTIONS WARN] No connections array for ${device.name}`);
+            console.log(`[ΛΗΨΗ ΣΥΝΔΕΣΕΩΝ] Δεν υπάρχει array συνδέσεων για ${device.name}`);
             return connected;
         }
         
@@ -480,7 +696,7 @@ class ConnectionManager {
             }
         });
         
-        console.log(`[GET CONNECTED DEVICES] ${device.name}: ${connected.map(d => d.name).join(', ')}`);
+        console.log(`[ΣΥΝΔΕΔΕΜΕΝΕΣ ΣΥΣΚΕΥΕΣ] ${device.name}: ${connected.map(d => d.name).join(', ')}`);
         return connected;
     }
     
@@ -488,11 +704,11 @@ class ConnectionManager {
     findPathBetweenDevices(device1, device2) {
         if (device1.id === device2.id) return [device1];
         
-        console.log(`[PATH DEBUG] Finding path: ${device1.name} → ${device2.name}`);
+        console.log(`[ΔΙΑΔΡΟΜΗ] Εύρεση διαδρομής: ${device1.name} → ${device2.name}`);
         
         // 1. Άμεση σύνδεση
         if (this.areDevicesConnected(device1, device2)) {
-            console.log(`[PATH DEBUG] Direct connection found`);
+            console.log(`[ΔΙΑΔΡΟΜΗ] Βρέθηκε άμεση σύνδεση`);
             return [device1, device2];
         }
         
@@ -505,7 +721,7 @@ class ConnectionManager {
             const current = queue.shift();
             const connectedDevices = this.getConnectedDevices(current.device);
             
-            console.log(`[PATH DEBUG] Current: ${current.device.name}, Connected: ${connectedDevices.map(d => d.name).join(', ')}`);
+            console.log(`[ΔΙΑΔΡΟΜΗ] Τρέχουσα: ${current.device.name}, Συνδεδεμένες: ${connectedDevices.map(d => d.name).join(', ')}`);
             
             for (const neighbor of connectedDevices) {
                 if (visited.has(neighbor.id)) continue;
@@ -515,7 +731,7 @@ class ConnectionManager {
                 
                 // Αν φτάσαμε στον προορισμό
                 if (neighbor.id === device2.id) {
-                    console.log(`[PATH DEBUG] Path found: ${newPath.map(d => d.name).join(' → ')}`);
+                    console.log(`[ΔΙΑΔΡΟΜΗ] Βρέθηκε διαδρομή: ${newPath.map(d => d.name).join(' → ')}`);
                     return newPath;
                 }
                 
@@ -523,28 +739,27 @@ class ConnectionManager {
             }
         }
         
-        console.log(`[PATH DEBUG] NO PATH FOUND from ${device1.name} to ${device2.name}`);
+        console.log(`[ΔΙΑΔΡΟΜΗ] ΔΕΝ ΒΡΕΘΗΚΕ διαδρομή από ${device1.name} προς ${device2.name}`);
         return null;
     }
     
-    // Έλεγχος επικοινωνίας με πλήρη διαδρομή - ΔΙΟΡΘΩΜΕΝΗ (ΚΡΙΤΙΚΗ ΔΙΟΡΘΩΣΗ)
+    // Έλεγχος επικοινωνίας με πλήρη διαδρομή
     canDevicesCommunicateWithPath(device1, device2) {
         const path = this.findPathBetweenDevices(device1, device2);
         
-        console.log(`[COMM PATH] ${device1.name} → ${device2.name}:`, 
-                   path ? path.map(d => d.name).join(' → ') : 'NO PATH');
+        console.log(`[ΕΠΙΚΟΙΝΩΝΙΑ ΜΕ ΔΙΑΔΡΟΜΗ] ${device1.name} → ${device2.name}:`, 
+                   path ? path.map(d => d.name).join(' → ') : 'ΔΕΝ ΥΠΑΡΧΕΙ ΔΙΑΔΡΟΜΗ');
         
         if (!path || path.length < 2) {
-            console.log(`[COMM PATH] No path or invalid path length`);
+            console.log(`[ΕΠΙΚΟΙΝΩΝΙΑ ΜΕ ΔΙΑΔΡΟΜΗ] Δεν υπάρχει διαδρομή ή είναι άκυρη`);
             return { canCommunicate: false, viaGateway: false, path: null };
         }
         
-        // ΚΡΙΤΙΚΗ ΔΙΟΡΘΩΣΗ: Χρησιμοποιούμε τη νέα μέθοδο canDevicesCommunicateDirectly
-        // που τώρα υποστηρίζει επικοινωνία μέσω switch
+        // Χρησιμοποιούμε τη νέα μέθοδο canDevicesCommunicateDirectly
         const directComm = this.canDevicesCommunicateDirectly(device1, device2);
         
         if (directComm.canCommunicate) {
-            console.log(`[COMM PATH] Communication possible: ${directComm.viaGateway ? 'via Gateway' : 'direct'}`);
+            console.log(`[ΕΠΙΚΟΙΝΩΝΙΑ ΜΕ ΔΙΑΔΡΟΜΗ] Επικοινωνία δυνατή: ${directComm.viaGateway ? 'μέσω Gateway' : 'άμεσα'}`);
             return { 
                 canCommunicate: true, 
                 viaGateway: directComm.viaGateway, 
@@ -552,7 +767,7 @@ class ConnectionManager {
             };
         }
         
-        console.log(`[COMM PATH] Communication NOT possible between ${device1.name} and ${device2.name}`);
+        console.log(`[ΕΠΙΚΟΙΝΩΝΙΑ ΜΕ ΔΙΑΔΡΟΜΗ] Επικοινωνία ΔΕΝ είναι δυνατή μεταξύ ${device1.name} και ${device2.name}`);
         return { canCommunicate: false, viaGateway: false, path: null };
     }
     
@@ -579,7 +794,7 @@ class ConnectionManager {
         this.packets = [];
     }
     
-    // Βοηθητική συνάρτηση: getNetworkAddress (παρόμοια με network-core.js)
+    // Βοηθητική συνάρτηση: getNetworkAddress
     getNetworkAddress(ip, subnetMask) {
         if (!ip || ip === 'N/A') return null;
         const ipParts = ip.split('.').map(Number);
