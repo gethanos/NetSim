@@ -325,10 +325,18 @@ updateDeviceInfo(device) {
     // Set the HTML
     this.deviceConfigContent.innerHTML = infoHTML;
     
-    // CRITICAL FIX: Delay event listener attachment to ensure DOM is ready
-    setTimeout(() => {
+    // FIXED: Use Promise for better cross-browser compatibility
+    Promise.resolve().then(() => {
         this.addDeviceConfigEventListeners(device);
-    }, 10);
+    }).catch(error => {
+        console.error('[UI] Error in Promise:', error);
+        // Fallback to setTimeout
+        setTimeout(() => {
+            this.addDeviceConfigEventListeners(device);
+        }, 0);
+    });
+    
+    return device; // Return the device for chaining
 }
     
     // Δημιουργία HTML για router configuration
@@ -544,8 +552,16 @@ addDeviceConfigEventListeners(device) {
     const safeAddListener = (elementId, event, handler) => {
         const element = document.getElementById(elementId);
         if (element) {
-            element.addEventListener(event, handler);
-            return true;
+            // Clone element to remove old listeners (fix for Safari/Firefox)
+            const newElement = element.cloneNode(true);
+            element.parentNode.replaceChild(newElement, element);
+            
+            // Get the new element and add listener
+            const updatedElement = document.getElementById(elementId);
+            if (updatedElement) {
+                updatedElement.addEventListener(event, handler);
+                return true;
+            }
         }
         return false;
     };
@@ -593,7 +609,11 @@ addDeviceConfigEventListeners(device) {
         // Add DNS record button - with null checks
         const addDnsBtn = document.getElementById('addDnsRecordBtn');
         if (addDnsBtn) {
-            addDnsBtn.addEventListener('click', () => {
+            // Clone to remove old listeners
+            const newAddDnsBtn = addDnsBtn.cloneNode(true);
+            addDnsBtn.parentNode.replaceChild(newAddDnsBtn, addDnsBtn);
+            
+            document.getElementById('addDnsRecordBtn').addEventListener('click', () => {
                 this.addDNSRecordFromUI(device);
             });
         } else {
@@ -603,8 +623,11 @@ addDeviceConfigEventListeners(device) {
         // Delete DNS record buttons
         setTimeout(() => {
             document.querySelectorAll('.delete-dns-record').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const domain = btn.dataset.domain;
+                const newBtn = btn.cloneNode(true);
+                btn.parentNode.replaceChild(newBtn, btn);
+                
+                newBtn.addEventListener('click', (e) => {
+                    const domain = newBtn.dataset.domain;
                     this.removeDNSRecord(device, domain);
                 });
             });
@@ -626,8 +649,11 @@ addDeviceConfigEventListeners(device) {
     // Delete connection buttons
     setTimeout(() => {
         document.querySelectorAll('.delete-connection').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const connId = btn.dataset.connectionId;
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('click', (e) => {
+                const connId = newBtn.dataset.connectionId;
                 this.removeConnectionById(connId);
                 this.updateDeviceInfo(device);
             });
