@@ -526,155 +526,106 @@ class SimulationManager {
         });
     }
     
-// Δοκιμή ping μεταξύ δύο συσκευών (με ολόκληρη διαδρομή μέχρι το Cloud)
 testPing(fromDevice, toDevice) {
     console.log(`[PING] Έλεγχος: ${fromDevice.name} → ${toDevice.name}`);
-    
+
     const fromIP = this.getIPForLog(fromDevice);
     const toIP = this.getIPForLog(toDevice);
-    
+
     console.log(`[PING] Από IP: ${fromIP}, Προς IP: ${toIP}`);
-    
-    // ΕΙΔΙΚΟΣ ΕΛΕΓΧΟΣ για εξωτερικές IP (Internet)
-    if (this.isExternalIP(toIP)) {
-        console.log(`[PING] Το ${toIP} είναι ΕΞΩΤΕΡΙΚΟ IP (Internet)`);
-        
-        // 1. Έλεγχος αν η συσκευή έχει gateway
-        const fromGatewayIP = fromDevice.gateway || 
-                             (fromDevice.interfaces?.lan?.gateway) || 
-                             (fromDevice.interfaces?.wan?.gateway);
-        
+
+    // Helper για IP/Subnet
+    const ipToInt = ip => ip.split('.').reduce((acc, val) => (acc << 8) + (+val), 0);
+    const inSameSubnet = (ip1, mask1, ip2, mask2) => {
+        if (!ip1 || !mask1 || !ip2 || !mask2) return false;
+        return (ipToInt(ip1) & ipToInt(mask1)) === (ipToInt(ip2) & ipToInt(mask2));
+    };
+
+    // Check αν απαιτείται gateway (διαφορετικό subnet)
+    let requiresGateway = false;
+    if (
+        fromDevice.gateway &&
+        fromDevice.gateway !== '0.0.0.0' &&
+        fromDevice.gateway !== 'N/A' &&
+        (!inSameSubnet(fromDevice.ip, fromDevice.subnetMask, toDevice.ip, toDevice.subnetMask || fromDevice.subnetMask))
+    ) {
+        requiresGateway = true;
+    }
+
+    let finalPath = null;
+    if (requiresGateway) {
+        // Gateway device
+        const fromGatewayIP = fromDevice.gateway ||
+            (fromDevice.interfaces?.lan?.gateway) ||
+            (fromDevice.interfaces?.wan?.gateway);
+
         console.log(`[PING] Gateway συσκευής: ${fromGatewayIP}`);
-        
-        if (fromGatewayIP && fromGatewayIP !== '0.0.0.0' && fromGatewayIP !== 'N/A') {
-            const gatewayDevice = window.deviceManager.getDeviceByIP(fromGatewayIP);
-            
-            if (gatewayDevice && gatewayDevice.type === 'router') {
-                console.log(`[PING] Το gateway είναι router: ${gatewayDevice.name}`);
-                
-                // 2. Βρες ποιος router είναι ΣΥΝΔΕΔΕΜΕΝΟΣ με το Cloud (8.8.8.8)
-                const allRouters = window.deviceManager.devices.filter(d => d.type === 'router');
-                let cloudRouter = null;
-                
-                for (const router of allRouters) {
-                    if (this.connectionManager.areDevicesConnected(router, toDevice)) {
-                        console.log(`[PING] Ο ${router.name} είναι ΣΥΝΔΕΔΕΜΕΝΟΣ με το Cloud`);
-                        cloudRouter = router;
-                        break;
-                    }
-                }
-                
-                if (!cloudRouter) {
-                    console.log(`[PING] Κανένας router δεν είναι συνδεδεμένος με το Cloud`);
-                    this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toIP} - ΑΠΟΤΥΧΙΑ (Δεν υπάρχει Cloud)`, 'error');
-                    return { success: false, external: true };
-                }
-                
-                console.log(`[PING] Το Cloud είναι συνδεδεμένο με: ${cloudRouter.name}`);
-                
-                // 3. Βρες την ΟΛΟΚΛΗΡΗ διαδρομή: PC → Gateway Router → Cloud Router → Cloud
-                const path1 = this.connectionManager.findPathBetweenDevices(fromDevice, gatewayDevice);
-                const path2 = this.connectionManager.findPathBetweenDevices(gatewayDevice, cloudRouter);
-                
-                if (path1 && path2) {
-                    // Συνένωση διαδρομών (χωρίς διπλό gatewayDevice)
-                    const fullPath = [
-                        ...path1.slice(0, -1), // Πάρε όλα εκτός από το τελευταίο (gatewayDevice)
-                        ...path2,              // Πρόσθεσε όλη τη 2η διαδρομή
-                        toDevice               // Προσθέσε το Cloud στο τέλος
-                    ];
-                    
-                    // Αφαίρεση διπλότυπων συσκευών
-                    const uniquePath = [];
-                    const seenIds = new Set();
-                    
-                    for (const device of fullPath) {
-                        if (!seenIds.has(device.id)) {
-                            seenIds.add(device.id);
-                            uniquePath.push(device);
-                        }
-                    }
-                    
-                    console.log(`[PING] Πλήρης διαδρομή: ${uniquePath.map(d => d.name).join(' → ')}`);
-                    
-                    // 4. Έλεγχος αν ο Cloud Router έχει πρόσβαση στο Internet
-                    const routerWanIP = cloudRouter.interfaces.wan.ip;
-                    const routerWanGateway = cloudRouter.interfaces.wan.gateway;
-                    
-                    console.log(`[PING] Cloud Router WAN: ${routerWanIP}, Gateway: ${routerWanGateway}`);
-                    
-                    let internetAccessMsg = '';
-                    if (routerWanIP !== 'N/A' && routerWanGateway !== '0.0.0.0') {
-                        internetAccessMsg = ` (Internet access via ${routerWanGateway})`;
-                    } else if (cloudRouter.routingTable && cloudRouter.routingTable.some(route => 
-                        route.destination === '0.0.0.0/0' || route.destination === '0.0.0.0')) {
-                        internetAccessMsg = ' (via default route)';
-                    }
-                    
-                    this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toIP} - ΕΠΙΤΥΧΙΑ${internetAccessMsg}`, 'success');
-                    
-                    // 5. ΟΠΤΙΚΟΠΟΙΗΣΗ ΟΛΗΣ ΤΗΣ ΔΙΑΔΡΟΜΗΣ!
-                    this.visualizePath(uniquePath, fromDevice, toDevice);
-                    
-                    // 6. Αναλυτικό log για τη διαδρομή
-                    setTimeout(() => {
-                        this.addLog(`Διαδρομή: ${uniquePath.map(d => d.name).join(' → ')}`, 'info');
-                        
-                        if (cloudRouter.id !== gatewayDevice.id) {
-                            this.addLog(`Routing: ${gatewayDevice.name} → ${cloudRouter.name} → Cloud`, 'info');
-                        } else {
-                            this.addLog(`Routing: ${gatewayDevice.name} → Cloud`, 'info');
-                        }
-                    }, 500);
-                    
-                    return { 
-                        success: true, 
-                        viaGateway: true, 
-                        external: true,
-                        requiresNAT: true,
-                        path: uniquePath,
-                        gateway: gatewayDevice.name,
-                        cloudRouter: cloudRouter.name
-                    };
+
+        const gatewayDevice = window.deviceManager.getDeviceByIP(fromGatewayIP);
+
+        if (gatewayDevice && gatewayDevice.type === 'router') {
+            console.log(`[PING] Το gateway είναι router: ${gatewayDevice.name}`);
+
+            // Path από απόDevice προς gateway
+            const pathToGateway = this.connectionManager.findPathBetweenDevices(fromDevice, gatewayDevice);
+            // Path από gateway προς ύψος
+            const pathFromGateway = this.connectionManager.findPathBetweenDevices(gatewayDevice, toDevice);
+
+            if (
+                pathToGateway &&
+                pathFromGateway &&
+                pathToGateway.length > 0 &&
+                pathFromGateway.length > 0
+            ) {
+                // Ενοποίηση διαδρομής (χωρίς διπλότυπο gateway)
+                if (pathToGateway[pathToGateway.length - 1].id === pathFromGateway[0].id) {
+                    finalPath = [...pathToGateway, ...pathFromGateway.slice(1)];
                 } else {
-                    console.log(`[PING] Δεν βρέθηκε πλήρης διαδρομή`);
-                    if (!path1) console.log(`[PING] Δεν υπάρχει διαδρομή προς ${gatewayDevice.name}`);
-                    if (!path2) console.log(`[PING] Δεν υπάρχει διαδρομή από ${gatewayDevice.name} προς ${cloudRouter.name}`);
+                    finalPath = [...pathToGateway, ...pathFromGateway];
                 }
+
+                this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toDevice.name} (${toIP}) ΜΕΣΩ GATEWAY (${gatewayDevice.name}) - ΕΠΙΤΥΧΙΑ`, 'success');
+                this.addLog(`Διαδρομή: ${finalPath.map(d => d.name).join(' → ')}`, 'info');
+                console.log(`[PING] Πλήρης διαδρομή (μέσω gateway):`, finalPath.map(d => d.name).join(' → '));
+                this.visualizePath(finalPath, fromDevice, toDevice);
+                this.createPingPacket(fromDevice, toDevice, finalPath);
+                return { success: true, viaGateway: true, path: finalPath };
             } else {
-                console.log(`[PING] Το gateway ${fromGatewayIP} δεν είναι router ή δεν βρέθηκε`);
+                console.log(`[PING] Δεν βρέθηκε πλήρης διαδρομή μέσω gateway`);
+                this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toDevice.name} (${toIP}) - ΑΠΟΤΥΧΙΑ (δεν υπάρχει διαδρομή μέσω gateway)`, 'error');
+                return { success: false, viaGateway: true };
             }
         } else {
-            console.log(`[PING] Η συσκευή ΔΕΝ έχει gateway ρυθμισμένο`);
+            console.log(`[PING] Το gateway ${fromGatewayIP} δεν είναι router ή δεν βρέθηκε`);
+            this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toDevice.name} (${toIP}) - ΑΠΟΤΥΧΙΑ (δεν βρέθηκε router gateway)`, 'error');
+            return { success: false, viaGateway: true };
         }
-        
-        this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toIP} - ΑΠΟΤΥΧΙΑ (Δεν υπάρχει πρόσβαση)`, 'error');
-        return { success: false, external: true };
-    }
-    
-    // Κανονικός έλεγχος για LAN pings
-    const communication = this.connectionManager.canDevicesCommunicateWithPath(fromDevice, toDevice);
-    
-    if (communication.canCommunicate) {
-        if (communication.viaGateway) {
-            this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toDevice.name} (${toIP}) ΜΕΣΩ GATEWAY - ΕΠΙΤΥΧΙΑ`, 'success');
-        } else {
-            this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toDevice.name} (${toIP}) - ΕΠΙΤΥΧΙΑ`, 'success');
-        }
-        
-        if (communication.path) {
-            this.addLog(`Διαδρομή: ${communication.path.map(d => d.name).join(' → ')}`, 'info');
-            this.visualizePath(communication.path, fromDevice, toDevice);
-        }
-        
-        this.createPingPacket(fromDevice, toDevice, communication.path);
-        return { success: true, viaGateway: communication.viaGateway, path: communication.path };
     } else {
-        this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toDevice.name} (${toIP}) - ΑΠΟΤΥΧΙΑ`, 'error');
-        return { success: false };
+        // ΠΕΡΙΠΤΩΣΗ ΧΩΡΙΣ GATEWAY (same subnet)
+        const communication = this.connectionManager.canDevicesCommunicateWithPath(fromDevice, toDevice);
+
+        if (communication.canCommunicate) {
+            if (communication.viaGateway) {
+                this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toDevice.name} (${toIP}) ΜΕΣΩ GATEWAY - ΕΠΙΤΥΧΙΑ`, 'success');
+            } else {
+                this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toDevice.name} (${toIP}) - ΕΠΙΤΥΧΙΑ`, 'success');
+            }
+
+            if (communication.path) {
+                this.visualizePath(communication.path, fromDevice, toDevice);
+                this.addLog(`Διαδρομή: ${communication.path.map(d => d.name).join(' → ')}`, 'info');
+                console.log(`[PING] Πλήρης διαδρομή: ${communication.path.map(d => d.name).join(' → ')}`);
+            }
+
+            this.createPingPacket(fromDevice, toDevice, communication.path);
+            return { success: true, viaGateway: communication.viaGateway, path: communication.path };
+        } else {
+            console.log(`[PING] Αποτυχία επικοινωνίας: δεν υπάρχει διαδρομή`);
+            this.addLog(`PING ${fromDevice.name} (${fromIP}) → ${toDevice.name} (${toIP}) - ΑΠΟΤΥΧΙΑ`, 'error');
+            return { success: false };
+        }
     }
 }
-    
     // Βοηθητική συνάρτηση για IP στο log
     getIPForLog(device) {
         if (!device) return 'N/A';
