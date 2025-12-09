@@ -103,50 +103,116 @@ class ConnectionManager {
     
     // ==================== ΚΥΡΙΕΣ ΜΕΘΟΔΟΙ ====================
     
-    // Δημιουργία νέας σύνδεσης
-    createConnection(device1, device2) {
-        // Έλεγχος για ύπαρξη σύνδεσης
-        const existingConnection = this.connections.find(conn => 
-            (conn.device1Id === device1.id && conn.device2Id === device2.id) ||
-            (conn.device1Id === device2.id && conn.device2Id === device1.id)
-        );
-        
-        if (existingConnection) {
-            console.log(`[ΣΥΝΔΕΣΗ] Οι συσκευές ${device1.name} και ${device2.name} είναι ήδη συνδεδεμένες`);
-            return existingConnection;
+
+// Μέθοδος για έλεγχο αν μία συσκευή μπορεί να δεχτεί νέα σύνδεση
+canAcceptConnection(device) {
+    // Log always to DevTools console
+    console.log('[ΣΥΝΔΕΣΙΜΟΤΗΤΑ][DEBUG CALL] canAcceptConnection called for:', device && device.name, device && device.type);
+
+    if (!device) {
+        console.log(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] ΑΠΟΡΡΙΦΘΗΚΕ: Δεν βρέθηκε η συσκευή.`);
+        if (window.uiManager) window.uiManager.addLog(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] ΑΠΟΡΡΙΦΘΗΚΕ: Δεν βρέθηκε η συσκευή.`, "error");
+        return false;
+    }
+
+    if (device.type === 'switch') {
+        console.log(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Η συσκευή ${device.name} (${device.type}) μπορεί να δεχτεί απεριόριστες συνδέσεις (switch).`);
+        if (window.uiManager) window.uiManager.addLog(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] ${device.name}: απεριόριστες συνδέσεις (switch)`, "info");
+        return true;
+    }
+
+    // --- Εδώ φιλτράρουμε ΜΟΝΟ τις πραγματικές συνδέσεις! ---
+    // Βρες όλα τα valid connection ids από τον manager
+    const managerConns = Array.isArray(window.connectionManager?.connections)
+        ? window.connectionManager.connections
+        : [];
+    const validConnectionIds = new Set(managerConns.map(conn => conn.id));
+    // Για τη συσκευή, φιλτράρουμε ώστε να κρατάμε μόνο όσα connections πραγματικά βρίσκονται στο manager
+    const realConnections = Array.isArray(device.connections)
+        ? device.connections.filter(id => validConnectionIds.has(id))
+        : [];
+    const currentConns = realConnections.length;
+
+    if (device.type === 'router') {
+        let maxConnections = device.interfaces ? Object.keys(device.interfaces).length : 2;
+        console.log(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Το router ${device.name} έχει ${currentConns} / ${maxConnections} έγκυρες συνδέσεις.`);
+        if (window.uiManager) window.uiManager.addLog(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Το router ${device.name} έχει ${currentConns} / ${maxConnections} έγκυρες συνδέσεις.`, "info");
+        if (currentConns < maxConnections) {
+            return true;
+        } else {
+            console.log(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Το router ${device.name} έχει ήδη το μέγιστο αριθμό συνδέσεων (${maxConnections}).`);
+            if (window.uiManager) window.uiManager.addLog(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Το router ${device.name} έχει ήδη το μέγιστο αριθμό συνδέσεων (${maxConnections}).`, "error");
+            return false;
         }
-        
-        const connectionId = `conn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        
-        const connection = {
-            id: connectionId,
-            device1Id: device1.id,
-            device2Id: device2.id,
-            canCommunicate: false,
-            type: 'direct'
-        };
-        
-        this.connections.push(connection);
-        
-        // ΔΙΟΡΘΩΣΗ: Βεβαιώνουμε ότι υπάρχουν τα arrays συνδέσεων
-        if (!device1.connections) {
-            console.log(`[ΔΙΟΡΘΩΣΗ] Δημιουργία array συνδέσεων για ${device1.name}`);
-            device1.connections = [];
-        }
-        if (!device2.connections) {
-            console.log(`[ΔΙΟΡΘΩΣΗ] Δημιουργία array συνδέσεων για ${device2.name}`);
-            device2.connections = [];
-        }
-        
-        // Προσθήκη σύνδεσης στις συσκευές
-        device1.connections.push(connectionId);
-        device2.connections.push(connectionId);
-        
-        console.log(`[ΣΥΝΔΕΣΗ ΔΗΜΙΟΥΡΓΗΘΗΚΕ] ${device1.name} ↔ ${device2.name}`);
-        
-        return connection;
+    }
+
+    // Υπόλοιπα: μόνο ΜΙΑ πραγματική σύνδεση επιτρέπεται
+    console.log(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Η συσκευή ${device.name} (${device.type}) έχει ${currentConns} έγκυρες συνδέσεις.`);
+    if (window.uiManager) window.uiManager.addLog(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Η συσκευή ${device.name} (${device.type}) έχει ${currentConns} έγκυρες συνδέσεις.`, "info");
+    if (currentConns < 1) {
+        console.log(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Η συσκευή ${device.name} μπορεί να δεχτεί μία σύνδεση.`);
+        if (window.uiManager) window.uiManager.addLog(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Η συσκευή ${device.name} μπορεί να δεχτεί μία σύνδεση.`, "success");
+        return true;
+    } else {
+        console.log(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Η συσκευή ${device.name} δεν μπορεί να δεχτεί περισσότερες από μία σύνδεση.`);
+        if (window.uiManager) window.uiManager.addLog(`[ΣΥΝΔΕΣΙΜΟΤΗΤΑ] Η συσκευή ${device.name} δεν μπορεί να δεχτεί περισσότερες από μία σύνδεση.`, "error");
+        return false;
+    }
+}
+
+// Μέθοδος δημιουργίας σύνδεσης με ΠΑΝΤΑ εμφανιζόμενα logs
+createConnection(device1, device2) {
+    console.log(`[ΣΥΝΔΕΣΗ] Έλεγχος αν οι συσκευές μπορούν να δεχτούν νέα σύνδεση: ${device1.name}, ${device2.name}`);
+    
+    const can1 = this.canAcceptConnection(device1);
+    const can2 = this.canAcceptConnection(device2);
+
+    if (!can1) {
+        console.log(`[ΣΥΝΔΕΣΗ] ΑΠΟΡΡΙΦΘΗΚΕ: Η συσκευή ${device1.name} δεν μπορεί να δεχτεί νέα σύνδεση.`);
+        return null;
+    }
+    if (!can2) {
+        console.log(`[ΣΥΝΔΕΣΗ] ΑΠΟΡΡΙΦΘΗΚΕ: Η συσκευή ${device2.name} δεν μπορεί να δεχτεί νέα σύνδεση.`);
+        return null;
+    }
+
+    // Έλεγχος για ύπαρξη σύνδεσης
+    const existingConnection = this.connections.find(conn => 
+        (conn.device1Id === device1.id && conn.device2Id === device2.id) ||
+        (conn.device1Id === device2.id && conn.device2Id === device1.id)
+    );
+    
+    if (existingConnection) {
+        console.log(`[ΣΥΝΔΕΣΗ] Οι συσκευές ${device1.name} και ${device2.name} είναι ήδη συνδεδεμένες.`);
+        return existingConnection;
     }
     
+    const connectionId = `conn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const connection = {
+        id: connectionId,
+        device1Id: device1.id,
+        device2Id: device2.id,
+        canCommunicate: false,
+        type: 'direct'
+    };
+    
+    this.connections.push(connection);
+    
+    if (!device1.connections) {
+        console.log(`[ΣΥΝΔΕΣΗ] Δημιουργήθηκε array συνδέσεων για ${device1.name}`);
+        device1.connections = [];
+    }
+    if (!device2.connections) {
+        console.log(`[ΣΥΝΔΕΣΗ] Δημιουργήθηκε array συνδέσεων για ${device2.name}`);
+        device2.connections = [];
+    }
+    
+    device1.connections.push(connectionId);
+    device2.connections.push(connectionId);
+    
+    console.log(`[ΣΥΝΔΕΣΗ] Δημιουργήθηκε νέα σύνδεση: ${device1.name} ↔ ${device2.name}`);
+    return connection;
+}
     // Αφαίρεση σύνδεσης
     removeConnection(connection) {
         const device1 = window.deviceManager.getDeviceById(connection.device1Id);
