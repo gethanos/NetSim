@@ -263,10 +263,18 @@ updateDeviceInfo(device) {
         case 'printer': deviceTypeText = 'Εκτυπωτής'; break;
         case 'dns': deviceTypeText = 'DNS Server'; break;
     }
-    
-    const statusText = device.status === 'online' ? 'Συνδεδεμένο' : 'Ασύνδετο';
-    const statusClass = device.status === 'online' ? 'status-online' : 'status-offline';
-    
+
+    // Χρήση connectionManager - ΕΙΝΑΙ το authoritative source για τις συνδέσεις!
+    const hasConnections = this.connectionManager.connections
+        .some(conn => conn.device1Id === device.id || conn.device2Id === device.id);
+
+    const statusText = (device.status === 'online' && hasConnections) ? 'Συνδεδεμένο' : 'Ασύνδετο';
+    const statusClass = (device.status === 'online' && hasConnections) ? 'status-online' : 'status-offline';
+
+    // Number of active connections
+    const connectionCount = this.connectionManager.connections
+        .filter(conn => conn.device1Id === device.id || conn.device2Id === device.id).length;
+
     let infoHTML = `
         <div class="config-panel">
             <h4>Βασικές Πληροφορίες</h4>
@@ -289,7 +297,7 @@ updateDeviceInfo(device) {
                 </div>
                 <div>
                     <strong>Συνδέσεις:</strong><br>
-                    <span style="font-size: 0.9rem;">${device.connections?.length || 0}</span>
+                    <span style="font-size: 0.9rem;">${connectionCount}</span>
                 </div>
             </div>
         </div>
@@ -306,7 +314,7 @@ updateDeviceInfo(device) {
     }
     
     // Connection list
-    if (device.connections && device.connections.length > 0) {
+    if (connectionCount > 0 && device.connections && device.connections.length > 0) {
         infoHTML += this.generateConnectionsListHTML(device);
     }
     
@@ -338,7 +346,6 @@ updateDeviceInfo(device) {
     
     return device; // Return the device for chaining
 }
-    
     // Δημιουργία HTML για router configuration
     generateRouterConfigHTML(router) {
         return `
