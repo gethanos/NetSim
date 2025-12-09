@@ -305,9 +305,18 @@ class DNSManager {
     // Βοηθητική συνάρτηση για logging
     addLog(message, type = 'info') {
         if (typeof window.addLog === 'function') {
-            window.addLog(message, type);
+         window.addLog(message, type);
         } else {
             console.log(`[DNS ${type.toUpperCase()}] ${message}`);
+        }
+    // Αυτόματο άνοιγμα κονσόλας μόνο για DNS logs success/error
+        if (type === 'success' || type === 'error') {
+            if (typeof window.toggleConsole === 'function') {
+                const consoleElement = document.getElementById('console');
+                if (consoleElement && consoleElement.style.display === 'none') {
+                    window.toggleConsole();
+                }
+            }
         }
     }
     
