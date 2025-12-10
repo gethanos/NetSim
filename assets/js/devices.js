@@ -99,7 +99,7 @@ class DeviceManager {
         return device;
     }
     
-    // Δημιουργία Router συσκευής
+    // Δημιουργία Router συσκευής - ΔΙΟΡΘΩΜΕΝΟ ΜΕ connectionInterfaces
     createRouterDevice(deviceId, type, deviceName, x, y, element) {
         return {
             id: deviceId,
@@ -119,6 +119,8 @@ class DeviceManager {
                     dns: ['192.168.1.1']
                 }
             },
+            // ΝΕΟ: Χαρτογράφηση συνδέσεων με interfaces - ΚΡΙΤΙΚΟ ΣΗΜΕΙΟ!
+            connectionInterfaces: {}, // { connectionId: 'wan' ή 'lan' }
             routingTable: [],
             x: x,
             y: y,
