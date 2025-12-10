@@ -231,121 +231,121 @@ class UIManager {
         }
     }
     
+    // Ενημέρωση πληροφορίες συσκευής (στο sidebar)
+    updateDeviceInfo(device) {
+        if (!this.deviceConfigContent) {
+            console.warn('[UI] Device config content not found');
+            return;
+        }
+        
+        if (!device) {
+            this.deviceConfigContent.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-mouse-pointer"></i>
+                    <p>Κάντε κλικ σε μια συσκευή για να δείτε τις πληροφορίες της</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Άνοιγμα του sidebar
+        this.showDevicePanel();
+        
+        // Δημιουργία πληροφοριών συσκευής
+        let deviceTypeText = '';
+        switch(device.type) {
+            case 'router': deviceTypeText = 'Router (Δρομολογητής)'; break;
+            case 'switch': deviceTypeText = 'Switch (Μεταγωγέας)'; break;
+            case 'computer': deviceTypeText = 'Υπολογιστής'; break;
+            case 'server': deviceTypeText = 'Εξυπηρετητής'; break;
+            case 'cloud': deviceTypeText = 'Cloud (WAN)'; break;
+            case 'printer': deviceTypeText = 'Εκτυπωτής'; break;
+            case 'dns': deviceTypeText = 'DNS Server'; break;
+        }
 
-// Ενημέρωση πληροφορίες συσκευής (στο sidebar)
-updateDeviceInfo(device) {
-    if (!this.deviceConfigContent) {
-        console.warn('[UI] Device config content not found');
-        return;
-    }
-    
-    if (!device) {
-        this.deviceConfigContent.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-mouse-pointer"></i>
-                <p>Κάντε κλικ σε μια συσκευή για να δείτε τις πληροφορίες της</p>
+        // Χρήση connectionManager - ΕΙΝΑΙ το authoritative source για τις συνδέσεις!
+        const hasConnections = this.connectionManager.connections
+            .some(conn => conn.device1Id === device.id || conn.device2Id === device.id);
+
+        const statusText = (device.status === 'online' && hasConnections) ? 'Συνδεδεμένο' : 'Ασύνδετο';
+        const statusClass = (device.status === 'online' && hasConnections) ? 'status-online' : 'status-offline';
+
+        // Number of active connections
+        const connectionCount = this.connectionManager.connections
+            .filter(conn => conn.device1Id === device.id || conn.device2Id === device.id).length;
+
+        let infoHTML = `
+            <div class="config-panel">
+                <h4>Βασικές Πληροφορίες</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <strong>Όνομα:</strong><br>
+                        <span style="font-size: 0.9rem;">${device.name}</span>
+                    </div>
+                    <div>
+                        <strong>Τύπος:</strong><br>
+                        <span style="font-size: 0.9rem;">${deviceTypeText}</span>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div>
+                        <strong>Κατάσταση:</strong><br>
+                        <span class="status-badge ${statusClass}" style="font-size: 0.8rem;">
+                            <i class="fas fa-circle"></i> ${statusText}
+                        </span>
+                    </div>
+                    <div>
+                        <strong>Συνδέσεις:</strong><br>
+                        <span style="font-size: 0.9rem;">${connectionCount}</span>
+                    </div>
+                </div>
             </div>
         `;
-        return;
-    }
-    
-    // Άνοιγμα του sidebar
-    this.showDevicePanel();
-    
-    // Δημιουργία πληροφοριών συσκευής
-    let deviceTypeText = '';
-    switch(device.type) {
-        case 'router': deviceTypeText = 'Router (Δρομολογητής)'; break;
-        case 'switch': deviceTypeText = 'Switch (Μεταγωγέας)'; break;
-        case 'computer': deviceTypeText = 'Υπολογιστής'; break;
-        case 'server': deviceTypeText = 'Εξυπηρετητής'; break;
-        case 'cloud': deviceTypeText = 'Cloud (WAN)'; break;
-        case 'printer': deviceTypeText = 'Εκτυπωτής'; break;
-        case 'dns': deviceTypeText = 'DNS Server'; break;
-    }
-
-    // Χρήση connectionManager - ΕΙΝΑΙ το authoritative source για τις συνδέσεις!
-    const hasConnections = this.connectionManager.connections
-        .some(conn => conn.device1Id === device.id || conn.device2Id === device.id);
-
-    const statusText = (device.status === 'online' && hasConnections) ? 'Συνδεδεμένο' : 'Ασύνδετο';
-    const statusClass = (device.status === 'online' && hasConnections) ? 'status-online' : 'status-offline';
-
-    // Number of active connections
-    const connectionCount = this.connectionManager.connections
-        .filter(conn => conn.device1Id === device.id || conn.device2Id === device.id).length;
-
-    let infoHTML = `
-        <div class="config-panel">
-            <h4>Βασικές Πληροφορίες</h4>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                <div>
-                    <strong>Όνομα:</strong><br>
-                    <span style="font-size: 0.9rem;">${device.name}</span>
-                </div>
-                <div>
-                    <strong>Τύπος:</strong><br>
-                    <span style="font-size: 0.9rem;">${deviceTypeText}</span>
-                </div>
+        
+        if (device.type === 'router') {
+            infoHTML += this.generateRouterConfigHTML(device);
+        } else if (device.type === 'dns') {
+            infoHTML += this.generateDNSConfigHTML(device);
+        } else if (device.type === 'switch') {
+            infoHTML += this.generateSwitchConfigHTML(device);
+        } else {
+            infoHTML += this.generateStandardConfigHTML(device);
+        }
+        
+        // Connection list
+        if (connectionCount > 0 && device.connections && device.connections.length > 0) {
+            infoHTML += this.generateConnectionsListHTML(device);
+        }
+        
+        // Action buttons
+        infoHTML += `
+            <div class="form-actions">
+                <button class="btn btn-danger" id="removeDeviceBtn">
+                    <i class="fas fa-trash-alt"></i> Διαγραφή
+                </button>
+                <button class="btn btn-primary" id="testDeviceBtn">
+                    <i class="fas fa-vial"></i> Δοκιμές
+                </button>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                <div>
-                    <strong>Κατάσταση:</strong><br>
-                    <span class="status-badge ${statusClass}" style="font-size: 0.8rem;">
-                        <i class="fas fa-circle"></i> ${statusText}
-                    </span>
-                </div>
-                <div>
-                    <strong>Συνδέσεις:</strong><br>
-                    <span style="font-size: 0.9rem;">${connectionCount}</span>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    if (device.type === 'router') {
-        infoHTML += this.generateRouterConfigHTML(device);
-    } else if (device.type === 'dns') {
-        infoHTML += this.generateDNSConfigHTML(device);
-    } else if (device.type === 'switch') {
-        infoHTML += this.generateSwitchConfigHTML(device);
-    } else {
-        infoHTML += this.generateStandardConfigHTML(device);
-    }
-    
-    // Connection list
-    if (connectionCount > 0 && device.connections && device.connections.length > 0) {
-        infoHTML += this.generateConnectionsListHTML(device);
-    }
-    
-    // Action buttons
-    infoHTML += `
-        <div class="form-actions">
-            <button class="btn btn-danger" id="removeDeviceBtn">
-                <i class="fas fa-trash-alt"></i> Διαγραφή
-            </button>
-            <button class="btn btn-primary" id="testDeviceBtn">
-                <i class="fas fa-vial"></i> Δοκιμές
-            </button>
-        </div>
-    `;
-    
-    // Set the HTML
-    this.deviceConfigContent.innerHTML = infoHTML;
-    
-    // FIXED: Use Promise for better cross-browser compatibility
-    Promise.resolve().then(() => {
-        this.addDeviceConfigEventListeners(device);
-    }).catch(error => {
-        console.error('[UI] Error in Promise:', error);
-        // Fallback to setTimeout
-        setTimeout(() => {
+        `;
+        
+        // Set the HTML
+        this.deviceConfigContent.innerHTML = infoHTML;
+        
+        // FIXED: Use Promise for better cross-browser compatibility
+        Promise.resolve().then(() => {
             this.addDeviceConfigEventListeners(device);
-        }, 0);
-    });
+        }).catch(error => {
+            console.error('[UI] Error in Promise:', error);
+            // Fallback to setTimeout
+            setTimeout(() => {
+                this.addDeviceConfigEventListeners(device);
+            }, 0);
+        });
+        
+        return device; // Return the device for chaining
+    }
     
-    return device; // Return the device for chaining
-}
     // Δημιουργία HTML για router configuration
     generateRouterConfigHTML(router) {
         return `
@@ -551,122 +551,122 @@ updateDeviceInfo(device) {
         `;
     }
     
-// Προσθήκη event listeners στα στοιχεία διαμόρφωσης
-addDeviceConfigEventListeners(device) {
-    console.log(`[UI] Setting up config listeners for ${device.name}`);
-    
-    // Helper function to safely add event listener
-    const safeAddListener = (elementId, event, handler) => {
-        const element = document.getElementById(elementId);
-        if (element) {
-            // Clone element to remove old listeners (fix for Safari/Firefox)
-            const newElement = element.cloneNode(true);
-            element.parentNode.replaceChild(newElement, element);
+    // Προσθήκη event listeners στα στοιχεία διαμόρφωσης
+    addDeviceConfigEventListeners(device) {
+        console.log(`[UI] Setting up config listeners for ${device.name}`);
+        
+        // Helper function to safely add event listener
+        const safeAddListener = (elementId, event, handler) => {
+            const element = document.getElementById(elementId);
+            if (element) {
+                // Clone element to remove old listeners (fix for Safari/Firefox)
+                const newElement = element.cloneNode(true);
+                element.parentNode.replaceChild(newElement, element);
+                
+                // Get the new element and add listener
+                const updatedElement = document.getElementById(elementId);
+                if (updatedElement) {
+                    updatedElement.addEventListener(event, handler);
+                    return true;
+                }
+            }
+            return false;
+        };
+        
+        // Remove device button
+        if (!safeAddListener('removeDeviceBtn', 'click', () => {
+            if (confirm(`Θέλετε να αφαιρέσετε τη συσκευή ${device.name};`)) {
+                this.removeDevice(device);
+                this.closeDevicePanel();
+            }
+        })) {
+            console.warn(`[UI] removeDeviceBtn not found for ${device.name}`);
+        }
+        
+        // Test device button
+        if (!safeAddListener('testDeviceBtn', 'click', () => {
+            this.showTestMenu(device);
+        })) {
+            console.warn(`[UI] testDeviceBtn not found for ${device.name}`);
+        }
+        
+        // Quick test buttons
+        ['quickPingBtn', 'quickRouteBtn', 'quickDNSBtn', 'quickManualDNSBtn'].forEach(btnId => {
+            if (!safeAddListener(btnId, 'click', () => {
+                this.handleQuickTest(device, btnId);
+            })) {
+                // Don't warn for quick buttons - they might not exist for all device types
+            }
+        });
+        
+        // Update buttons based on device type
+        if (device.type === 'router') {
+            if (!safeAddListener('updateRouterBtn', 'click', () => {
+                this.updateRouterConfig(device);
+            })) {
+                console.warn(`[UI] updateRouterBtn not found for router ${device.name}`);
+            }
+        } else if (device.type === 'dns') {
+            if (!safeAddListener('updateDnsBtn', 'click', () => {
+                this.updateDNSConfig(device);
+            })) {
+                console.warn(`[UI] updateDnsBtn not found for DNS ${device.name}`);
+            }
             
-            // Get the new element and add listener
-            const updatedElement = document.getElementById(elementId);
-            if (updatedElement) {
-                updatedElement.addEventListener(event, handler);
-                return true;
+            // Add DNS record button - with null checks
+            const addDnsBtn = document.getElementById('addDnsRecordBtn');
+            if (addDnsBtn) {
+                // Clone to remove old listeners
+                const newAddDnsBtn = addDnsBtn.cloneNode(true);
+                addDnsBtn.parentNode.replaceChild(newAddDnsBtn, addDnsBtn);
+                
+                document.getElementById('addDnsRecordBtn').addEventListener('click', () => {
+                    this.addDNSRecordFromUI(device);
+                });
+            } else {
+                console.warn(`[UI] addDnsRecordBtn not found for DNS ${device.name}`);
+            }
+            
+            // Delete DNS record buttons
+            setTimeout(() => {
+                document.querySelectorAll('.delete-dns-record').forEach(btn => {
+                    const newBtn = btn.cloneNode(true);
+                    btn.parentNode.replaceChild(newBtn, btn);
+                    
+                    newBtn.addEventListener('click', (e) => {
+                        const domain = newBtn.dataset.domain;
+                        this.removeDNSRecord(device, domain);
+                    });
+                });
+            }, 100);
+        } else if (device.type === 'switch') {
+            if (!safeAddListener('updateSwitchBtn', 'click', () => {
+                this.updateDeviceConfig(device);
+            })) {
+                console.warn(`[UI] updateSwitchBtn not found for switch ${device.name}`);
+            }
+        } else {
+            if (!safeAddListener('updateDeviceBtn', 'click', () => {
+                this.updateDeviceConfig(device);
+            })) {
+                console.warn(`[UI] updateDeviceBtn not found for ${device.type} ${device.name}`);
             }
         }
-        return false;
-    };
-    
-    // Remove device button
-    if (!safeAddListener('removeDeviceBtn', 'click', () => {
-        if (confirm(`Θέλετε να αφαιρέσετε τη συσκευή ${device.name};`)) {
-            this.removeDevice(device);
-            this.closeDevicePanel();
-        }
-    })) {
-        console.warn(`[UI] removeDeviceBtn not found for ${device.name}`);
-    }
-    
-    // Test device button
-    if (!safeAddListener('testDeviceBtn', 'click', () => {
-        this.showTestMenu(device);
-    })) {
-        console.warn(`[UI] testDeviceBtn not found for ${device.name}`);
-    }
-    
-    // Quick test buttons
-    ['quickPingBtn', 'quickRouteBtn', 'quickDNSBtn', 'quickManualDNSBtn'].forEach(btnId => {
-        if (!safeAddListener(btnId, 'click', () => {
-            this.handleQuickTest(device, btnId);
-        })) {
-            // Don't warn for quick buttons - they might not exist for all device types
-        }
-    });
-    
-    // Update buttons based on device type
-    if (device.type === 'router') {
-        if (!safeAddListener('updateRouterBtn', 'click', () => {
-            this.updateRouterConfig(device);
-        })) {
-            console.warn(`[UI] updateRouterBtn not found for router ${device.name}`);
-        }
-    } else if (device.type === 'dns') {
-        if (!safeAddListener('updateDnsBtn', 'click', () => {
-            this.updateDNSConfig(device);
-        })) {
-            console.warn(`[UI] updateDnsBtn not found for DNS ${device.name}`);
-        }
         
-        // Add DNS record button - with null checks
-        const addDnsBtn = document.getElementById('addDnsRecordBtn');
-        if (addDnsBtn) {
-            // Clone to remove old listeners
-            const newAddDnsBtn = addDnsBtn.cloneNode(true);
-            addDnsBtn.parentNode.replaceChild(newAddDnsBtn, addDnsBtn);
-            
-            document.getElementById('addDnsRecordBtn').addEventListener('click', () => {
-                this.addDNSRecordFromUI(device);
-            });
-        } else {
-            console.warn(`[UI] addDnsRecordBtn not found for DNS ${device.name}`);
-        }
-        
-        // Delete DNS record buttons
+        // Delete connection buttons
         setTimeout(() => {
-            document.querySelectorAll('.delete-dns-record').forEach(btn => {
+            document.querySelectorAll('.delete-connection').forEach(btn => {
                 const newBtn = btn.cloneNode(true);
                 btn.parentNode.replaceChild(newBtn, btn);
                 
                 newBtn.addEventListener('click', (e) => {
-                    const domain = newBtn.dataset.domain;
-                    this.removeDNSRecord(device, domain);
+                    const connId = newBtn.dataset.connectionId;
+                    this.removeConnectionById(connId);
+                    this.updateDeviceInfo(device);
                 });
             });
         }, 100);
-    } else if (device.type === 'switch') {
-        if (!safeAddListener('updateSwitchBtn', 'click', () => {
-            this.updateDeviceConfig(device);
-        })) {
-            console.warn(`[UI] updateSwitchBtn not found for switch ${device.name}`);
-        }
-    } else {
-        if (!safeAddListener('updateDeviceBtn', 'click', () => {
-            this.updateDeviceConfig(device);
-        })) {
-            console.warn(`[UI] updateDeviceBtn not found for ${device.type} ${device.name}`);
-        }
     }
-    
-    // Delete connection buttons
-    setTimeout(() => {
-        document.querySelectorAll('.delete-connection').forEach(btn => {
-            const newBtn = btn.cloneNode(true);
-            btn.parentNode.replaceChild(newBtn, btn);
-            
-            newBtn.addEventListener('click', (e) => {
-                const connId = newBtn.dataset.connectionId;
-                this.removeConnectionById(connId);
-                this.updateDeviceInfo(device);
-            });
-        });
-    }, 100);
-}
     
     // Χειρισμός γρήγορων δοκιμών
     handleQuickTest(device, buttonId) {
@@ -751,13 +751,18 @@ addDeviceConfigEventListeners(device) {
     handleDeviceClick(device) {
         console.log(`[UI] Device clicked: ${device.name}`);
         
+        // ΑΝ ΕΙΜΑΣΤΕ ΣΕ ΕΙΔΙΚΟ MODE, ΜΗΝ ΑΝΟΙΞΕΙΣ DEVICE PANEL!
         if (this.connectionMode) {
             this.handleConnectionClick(device);
+            return; // ΣΤΑΜΑΤΑ ΕΔΩ - μην ανοίξεις device panel
         } else if (this.testMode) {
             this.handleTestModeClick(device);
+            return; // ΣΤΑΜΑΤΑ ΕΔΩ - μην ανοίξεις device panel
         } else if (this.manualDNSMode) {
             this.handleManualDNSModeClick(device);
+            return; // ΣΤΑΜΑΤΑ ΕΔΩ - μην ανοίξεις device panel
         } else {
+            // ΜΟΝΟ όταν ΔΕΝ είμαστε σε special mode, ανοίγουμε το panel
             this.selectDevice(device);
         }
     }
@@ -808,11 +813,13 @@ addDeviceConfigEventListeners(device) {
             device.element.classList.add('connect-mode');
             this.setModeText(`Επιλέξτε δεύτερη συσκευή για σύνδεση`);
             this.addLog(`Επιλέχθηκε πρώτη συσκευή: ${device.name}`, 'info');
+            // ΜΗΝ ανοίγεις device panel εδώ!
         } else if (this.firstDeviceForConnection.id === device.id) {
             device.element.classList.remove('connect-mode');
             this.firstDeviceForConnection = null;
             this.setModeText(`Επιλέξτε πρώτη συσκευή`);
             this.addLog('Ακυρώθηκε η σύνδεση', 'info');
+            // ΜΗΝ ανοίγεις device panel εδώ!
         } else {
             try {
                 this.connectionManager.createConnection(this.firstDeviceForConnection, device);
@@ -823,7 +830,9 @@ addDeviceConfigEventListeners(device) {
                 this.connectionMode = false;
                 if (this.buttons.connect) this.buttons.connect.classList.remove('active');
                 this.setModeText(`Επιλογή Συσκευών`);
-                this.selectDevice(device);
+                
+                // ΜΗΝ επιλέγουμε τη συσκευή - δεν θέλουμε να ανοίξει panel
+                // this.selectDevice(device); // Αφαιρέθηκε
                 
                 // Ενημέρωση στατιστικών
                 this.updateNetworkStats();
@@ -843,6 +852,7 @@ addDeviceConfigEventListeners(device) {
             device.element.classList.add('test-mode');
             this.setModeText(`Επιλέξτε 2η συσκευή για δοκιμή από ${device.name}`);
             this.addLog(`Επιλέχθηκε πρώτη συσκευή για δοκιμή: ${device.name}`, 'info');
+            // ΜΗΝ ανοίγεις device panel εδώ!
         } else if (this.firstTestDevice.id === device.id) {
             device.element.classList.remove('test-mode');
             this.firstTestDevice = null;
@@ -850,6 +860,7 @@ addDeviceConfigEventListeners(device) {
             if (this.buttons.testRoute) this.buttons.testRoute.classList.remove('active');
             this.setModeText(`Επιλογή Συσκευών`);
             this.addLog('Ακυρώθηκε η δοκιμή διαδρομής', 'info');
+            // ΜΗΝ ανοίγεις device panel εδώ!
         } else {
             this.testCommunicationBetween(this.firstTestDevice, device);
             
@@ -859,7 +870,8 @@ addDeviceConfigEventListeners(device) {
             if (this.buttons.testRoute) this.buttons.testRoute.classList.remove('active');
             this.setModeText(`Επιλογή Συσκευών`);
             
-            this.selectDevice(device);
+            // ΜΗΝ επιλέγουμε τη συσκευή - δεν θέλουμε να ανοίξει panel
+            // this.selectDevice(device); // Αφαιρέθηκε
         }
     }
     
@@ -870,6 +882,7 @@ addDeviceConfigEventListeners(device) {
             device.element.classList.add('dns-source-mode');
             this.setModeText(`Επιλέξτε DNS Server`);
             this.addLog(`Επιλέχθηκε πηγή: ${device.name}`, 'info');
+            // ΜΗΝ ανοίγεις device panel εδώ!
         } 
         else if (this.dnsSourceDevice.id === device.id) {
             device.element.classList.remove('dns-source-mode');
@@ -878,6 +891,7 @@ addDeviceConfigEventListeners(device) {
             if (this.buttons.manualDNS) this.buttons.manualDNS.classList.remove('active');
             this.setModeText(`Επιλογή Συσκευών`);
             this.addLog('Ακυρώθηκε η χειροκίνητη δοκιμή DNS', 'info');
+            // ΜΗΝ ανοίγεις device panel εδώ!
         }
         else {
             if (!this.dnsManager.canResolveDNS(device)) {
@@ -901,7 +915,8 @@ addDeviceConfigEventListeners(device) {
             if (this.buttons.manualDNS) this.buttons.manualDNS.classList.remove('active');
             this.setModeText(`Επιλογή Συσκευών`);
             
-            this.selectDevice(dnsServerDevice);
+            // ΜΗΝ επιλέγουμε τη συσκευή - δεν θέλουμε να ανοίξει panel
+            // this.selectDevice(dnsServerDevice); // Αφαιρέθηκε
             
             setTimeout(() => {
                 const availableDomains = Object.keys(this.dnsManager.globalDnsRecords);
@@ -993,7 +1008,7 @@ addDeviceConfigEventListeners(device) {
             // Ακύρωσε ΟΛΟΥΣ εκτός από connection mode
             this.cancelOtherModes('connection');
             
-            this.closeDevicePanel();
+            this.closeDevicePanel(); // Κλείνουμε το panel όταν μπαίνουμε σε special mode
             this.firstDeviceForConnection = null;
         } else {
             this.setModeText(`Επιλογή Συσκευών`);
@@ -1019,7 +1034,7 @@ addDeviceConfigEventListeners(device) {
             // Ακύρωσε ΟΛΟΥΣ εκτός από test mode
             this.cancelOtherModes('test');
             
-            this.closeDevicePanel();
+            this.closeDevicePanel(); // Κλείνουμε το panel όταν μπαίνουμε σε special mode
             this.firstTestDevice = null;
         } else {
             if (this.buttons.testRoute) this.buttons.testRoute.classList.remove('primary');
@@ -1043,7 +1058,7 @@ addDeviceConfigEventListeners(device) {
             // Ακύρωσε ΟΛΟΥΣ εκτός από dns mode
             this.cancelOtherModes('dns');
             
-            this.closeDevicePanel();
+            this.closeDevicePanel(); // Κλείνουμε το panel όταν μπαίνουμε σε special mode
             this.dnsSourceDevice = null;
         } else {
             if (this.buttons.manualDNS) this.buttons.manualDNS.classList.remove('primary');
@@ -1382,47 +1397,47 @@ addDeviceConfigEventListeners(device) {
         }
     }
     
-// In ui.js - FIXED VERSION:
-addDNSRecordFromUI(dnsDevice) {
-    try {
-        const domainInput = document.getElementById('newDnsDomain');
-        const ipInput = document.getElementById('newDnsIp');
-        
-        if (!domainInput || !ipInput) {
-            this.addLog('Σφάλμα: Τα πεδία DNS δεν βρέθηκαν', 'error');
+    // In ui.js - FIXED VERSION:
+    addDNSRecordFromUI(dnsDevice) {
+        try {
+            const domainInput = document.getElementById('newDnsDomain');
+            const ipInput = document.getElementById('newDnsIp');
+            
+            if (!domainInput || !ipInput) {
+                this.addLog('Σφάλμα: Τα πεδία DNS δεν βρέθηκαν', 'error');
+                return null;
+            }
+            
+            const domain = domainInput.value.trim();
+            const ip = ipInput.value.trim();
+            
+            if (!domain || !ip) {
+                this.addLog('Παρακαλώ συμπληρώστε και τα δύο πεδία', 'error');
+                return null;
+            }
+            
+            // Validate IP before adding
+            if (!this.deviceManager.simpleIPCheck(ip)) {
+                this.addLog(`Λάθος IP: ${ip} - Κάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.100)`, 'error');
+                return null;
+            }
+            
+            // Call dnsManager.addDNSRecord directly (not addDNSRecordFromUI)
+            const result = this.dnsManager.addDNSRecord(domain, ip, dnsDevice);
+            
+            if (result) {
+                domainInput.value = '';
+                ipInput.value = '';
+                this.addLog(`Προστέθηκε DNS record: ${domain} → ${ip}`, 'success');
+                setTimeout(() => this.updateDeviceInfo(dnsDevice), 100);
+            }
+            return result;
+        } catch (error) {
+            console.error('[UI] Error in addDNSRecordFromUI:', error);
+            this.addLog(`Σφάλμα: ${error.message}`, 'error');
             return null;
         }
-        
-        const domain = domainInput.value.trim();
-        const ip = ipInput.value.trim();
-        
-        if (!domain || !ip) {
-            this.addLog('Παρακαλώ συμπληρώστε και τα δύο πεδία', 'error');
-            return null;
-        }
-        
-        // Validate IP before adding
-        if (!this.deviceManager.simpleIPCheck(ip)) {
-            this.addLog(`Λάθος IP: ${ip} - Κάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.100)`, 'error');
-            return null;
-        }
-        
-        // Call dnsManager.addDNSRecord directly (not addDNSRecordFromUI)
-        const result = this.dnsManager.addDNSRecord(domain, ip, dnsDevice);
-        
-        if (result) {
-            domainInput.value = '';
-            ipInput.value = '';
-            this.addLog(`Προστέθηκε DNS record: ${domain} → ${ip}`, 'success');
-            setTimeout(() => this.updateDeviceInfo(dnsDevice), 100);
-        }
-        return result;
-    } catch (error) {
-        console.error('[UI] Error in addDNSRecordFromUI:', error);
-        this.addLog(`Σφάλμα: ${error.message}`, 'error');
-        return null;
     }
-}
     
     removeDNSRecord(dnsDevice, domain) {
         if (confirm(`Διαγραφή DNS record για ${domain};`)) {
