@@ -167,7 +167,17 @@ class UIManager {
             { button: this.buttons.clear, handler: () => this.clearWorkspace(), name: 'clear' },
             { button: this.buttons.connect, handler: () => this.toggleConnectionMode(), name: 'connect' },
             { button: this.buttons.simulate, handler: () => this.toggleSimulation(), name: 'simulate' },
-            { button: this.buttons.testPing, handler: () => this.testPingBetweenDevices(), name: 'testPing' },
+{ button: this.buttons.testPing, handler: () => {
+    // Βρες την επιλεγμένη συσκευή
+    const selectedDevice = this.deviceManager.selectedDevice;
+    
+    if (selectedDevice) {
+        // Χρήση της υπάρχουσας μεθόδου που χρησιμοποιεί το quickPingBtn
+        this.testPingFromDevice(selectedDevice);
+    } else {
+        this.addLog('Παρακαλώ επιλέξτε πρώτα μια συσκευή', 'warning');
+    }
+}, name: 'testPing' },
             { button: this.buttons.testRoute, handler: () => this.toggleTestMode(), name: 'testRoute' },
             { button: this.buttons.testDNS, handler: () => this.testAutoDNS(), name: 'testDNS' },
             { button: this.buttons.manualDNS, handler: () => this.toggleManualDNSMode(), name: 'manualDNS' },
