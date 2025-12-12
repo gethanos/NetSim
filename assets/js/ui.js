@@ -238,7 +238,7 @@ class UIManager {
                 <div class="empty-state">
                     <i class="fas fa-mouse-pointer"></i>
                     <p>Κάντε κλικ σε μια συσκευή για να δείτε τις πληροφορίες της</p>
-                </div>
+            </div>
             `;
             return;
         }
@@ -269,58 +269,34 @@ class UIManager {
         const connectionCount = this.connectionManager.connections
             .filter(conn => conn.device1Id === device.id || conn.device2Id === device.id).length;
 
-        let infoHTML = `
+      let infoHTML = `
             <div class="config-panel">
-                <h4>Βασικές Πληροφορίες</h4>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                    <div>
-                        <strong>Όνομα:</strong><br>
-                        <span style="font-size: 0.9rem;">${device.name}</span>
+                <h4 class="text-secondary">Βασικές Πληροφορίες</h4>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <strong class="text-tertiary">Όνομα:</strong><br>
+                        <span class="device-name-value">${device.name}</span>
                     </div>
-                    <div>
-                        <strong>Τύπος:</strong><br>
-                        <span style="font-size: 0.9rem;">${deviceTypeText}</span>
+                    <div class="info-item">
+                        <strong class="text-tertiary">Τύπος:</strong><br>
+                        <span class="device-type-value">${deviceTypeText}</span>
                     </div>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                    <div>
-                        <strong>Κατάσταση:</strong><br>
-                        <span class="status-badge ${statusClass}" style="font-size: 0.8rem;">
+                <div class="info-grid">
+                    <div class="info-item">
+                        <strong class="text-tertiary">Κατάσταση:</strong><br>
+                        <span class="status-badge ${statusClass}">
                             <i class="fas fa-circle"></i> ${statusText}
                         </span>
                     </div>
-                    <div>
-                        <strong>Συνδέσεις:</strong><br>
-                        <span style="font-size: 0.9rem;">${connectionCount}</span>
+                    <div class="info-item">
+                        <strong class="text-tertiary">Συνδέσεις:</strong><br>
+                        <span class="connection-count-value">${connectionCount}</span>
                     </div>
                 </div>
             </div>
         `;
         
-        // ΕΙΔΙΚΟ: Προσθήκη πληροφοριών interfaces για routers
-        if (device.type === 'router' && device.connectionInterfaces && Object.keys(device.connectionInterfaces).length > 0) {
-            infoHTML += `
-                <div class="config-panel">
-                    <h4><i class="fas fa-network-wired"></i> Συνδέσεις ανά Interface</h4>
-            `;
-            
-            for (const [connId, interfaceType] of Object.entries(device.connectionInterfaces)) {
-                const conn = this.connectionManager.connections.find(c => c.id === connId);
-                if (conn) {
-                    const otherId = conn.device1Id === device.id ? conn.device2Id : conn.device1Id;
-                    const otherDevice = this.deviceManager.getDeviceById(otherId);
-                    if (otherDevice) {
-                        infoHTML += `
-                            <div style="margin: 5px 0; padding: 8px; background: #f8f9fa; border-radius: 4px;">
-                                <strong>${interfaceType.toUpperCase()}:</strong> ${otherDevice.name}
-                            </div>
-                        `;
-                    }
-                }
-            }
-            
-            infoHTML += `</div>`;
-        }
         
         if (device.type === 'router') {
             infoHTML += this.generateRouterConfigHTML(device);
@@ -364,113 +340,436 @@ class UIManager {
         return device;
     }
     
-    // Δημιουργία HTML για router configuration
-    generateRouterConfigHTML(router) {
-        return `
+// Δημιουργία HTML για router configuration - ΟΛΟΚΛΗΡΩΜΕΝΗ ΜΕ ΟΛΑ ΤΑ INTERFACES
+generateRouterConfigHTML(router) {
+    // Προσθήκη πληροφοριών interfaces για routers
+    let interfaceConnectionsHTML = '';
+    
+    if (router.type === 'router' && router.connections && router.connections.length > 0) {
+        interfaceConnectionsHTML = `
             <div class="config-panel">
-                <h4><i class="fas fa-wifi"></i> Ρυθμίσεις Router</h4>
-                <div class="form-group">
-                    <label for="routerWanIp">WAN IP:</label>
-                    <input type="text" id="routerWanIp" value="${router.interfaces.wan.ip}" placeholder="203.0.113.1">
+                <h4><i class="fas fa-network-wired"></i> Συνδέσεις ανά Interface</h4>
+        `;
+        
+        // Ομαδοποίηση συνδέσεων ανά interface
+        const connectionsByInterface = {
+            wan: [],
+            lan: [],
+            lan2: []
+        };
+        
+        // Επεξεργασία όλων των συνδέσεων του router
+        router.connections.forEach(connId => {
+            const conn = this.connectionManager.connections.find(c => c.id === connId);
+            if (!conn) return;
+            
+            const otherId = conn.device1Id === router.id ? conn.device2Id : conn.device1Id;
+            const otherDevice = this.deviceManager.getDeviceById(otherId);
+            if (!otherDevice) return;
+            
+            // ΠΡΟΣΔΙΟΡΙΣΜΟΣ ΣΩΣΤΟΥ INTERFACE - ΔΙΟΡΘΩΜΕΝΗ ΛΟΓΙΚΗ
+            let interfaceType = this.determineCorrectRouterInterface(router, otherDevice);
+            
+            // Προσθήκη στη λίστα του αντίστοιχου interface
+            if (interfaceType && connectionsByInterface[interfaceType]) {
+                connectionsByInterface[interfaceType].push({
+                    deviceName: otherDevice.name,
+                    deviceType: otherDevice.type,
+                    deviceIp: otherDevice.ip || 'N/A',
+                    connId: conn.id
+                });
+            }
+        });
+        
+        // Εμφάνιση συνδέσεων για κάθε interface
+        let hasAnyConnections = false;
+        
+// WAN Interface
+if (connectionsByInterface.wan.length > 0) {
+    hasAnyConnections = true;
+    interfaceConnectionsHTML += `<h5 class="interface-section-title wan"><i class="fas fa-globe"></i> WAN Interface</h5>`;
+    connectionsByInterface.wan.forEach(conn => {
+        interfaceConnectionsHTML += `
+            <div class="interface-item wan">
+                <div class="interface-item-content">
+                    <div class="interface-item-details">
+                        <div class="interface-device-name">${conn.deviceName}</div>
+                        <div class="interface-info">${conn.deviceType} • ${conn.deviceIp}</div>
+                    </div>
+                    <button class="btn btn-sm btn-danger delete-connection" 
+                            data-connection-id="${conn.connId}">
+                        <i class="fas fa-unlink"></i>
+                    </button>
                 </div>
-                <div class="form-group">
-                    <label for="routerLanIp">LAN IP:</label>
-                    <input type="text" id="routerLanIp" value="${router.interfaces.lan.ip}" placeholder="192.168.1.1">
-                </div>
-                <div class="form-group">
-                    <label for="routerSubnet">Subnet Mask:</label>
-                    <input type="text" id="routerSubnet" value="${router.interfaces.lan.subnetMask}" placeholder="255.255.255.0">
-                </div>
-                <button class="btn btn-success" id="updateRouterBtn" style="width: 100%;">
-                    <i class="fas fa-save"></i> Ενημέρωση
-                </button>
             </div>
         `;
-    }
-    
-    // Δημιουργία HTML για DNS configuration
-    generateDNSConfigHTML(dnsDevice) {
-        const dnsRecords = this.dnsManager.getAllDNSRecordsForDisplay();
-        
-        let dnsRecordsHTML = '';
-        if (dnsRecords.length > 0) {
-            dnsRecordsHTML = dnsRecords.map(record => {
-                const typeClass = record.type === 'Local' ? 'local' : 
-                                 record.type === 'External' ? 'external' : 'custom';
-                return `
-                    <div class="dns-record ${typeClass}">
-                        <div class="dns-record-info">
-                            <div class="dns-domain">${record.domain}</div>
-                            <div class="dns-ip">${record.ip}</div>
-                        </div>
-                        <button class="btn btn-sm btn-danger delete-dns-record" data-domain="${record.domain}">
-                            <i class="fas fa-times"></i>
-                        </button>
+    });
+}
+
+// LAN Interface
+if (connectionsByInterface.lan.length > 0) {
+    hasAnyConnections = true;
+    interfaceConnectionsHTML += `<h5 class="interface-section-title lan"><i class="fas fa-network-wired"></i> LAN Interface</h5>`;
+    connectionsByInterface.lan.forEach(conn => {
+        interfaceConnectionsHTML += `
+            <div class="interface-item lan">
+                <div class="interface-item-content">
+                    <div class="interface-item-details">
+                        <div class="interface-device-name">${conn.deviceName}</div>
+                        <div class="interface-info">${conn.deviceType} • ${conn.deviceIp}</div>
                     </div>
-                `;
-            }).join('');
-        } else {
-            dnsRecordsHTML = '<div style="text-align: center; padding: 20px; color: #6c757d;">Δεν υπάρχουν DNS records</div>';
+                    <button class="btn btn-sm btn-danger delete-connection" 
+                            data-connection-id="${conn.connId}">
+                        <i class="fas fa-unlink"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+}
+
+// LAN2 Interface
+if (connectionsByInterface.lan2.length > 0) {
+    hasAnyConnections = true;
+    interfaceConnectionsHTML += `<h5 class="interface-section-title lan2"><i class="fas fa-network-wired"></i> LAN2 Interface</h5>`;
+    connectionsByInterface.lan2.forEach(conn => {
+        interfaceConnectionsHTML += `
+            <div class="interface-item lan2">
+                <div class="interface-item-content">
+                    <div class="interface-item-details">
+                        <div class="interface-device-name">${conn.deviceName}</div>
+                        <div class="interface-info">${conn.deviceType} • ${conn.deviceIp}</div>
+                    </div>
+                    <button class="btn btn-sm btn-danger delete-connection" 
+                            data-connection-id="${conn.connId}">
+                        <i class="fas fa-unlink"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+}
+        
+        if (!hasAnyConnections) {
+            interfaceConnectionsHTML += `
+                <div class="no-connections-message">
+                    <i class="fas fa-plug"></i>
+                    <p>Δεν υπάρχουν συνδέσεις</p>
+                </div>
+            `;
         }
         
-        return `
-            <div class="config-panel">
-                <h4><i class="fas fa-search"></i> Ρυθμίσεις DNS</h4>
-                <div class="form-group">
-                    <label for="dnsIp">Διεύθυνση IP:</label>
-                    <input type="text" id="dnsIp" value="${dnsDevice.ip}" placeholder="192.168.1.53">
+        interfaceConnectionsHTML += `</div>`;
+    }
+    
+    // Βοηθητική συνάρτηση για ΣΩΣΤΟ προσδιορισμό interface - ΔΙΟΡΘΩΜΕΝΗ
+    const determineCorrectRouterInterface = (router, connectedDevice) => {
+        // 1. Εάν είναι cloud, είναι πάντα WAN
+        if (connectedDevice.type === 'cloud') {
+            return 'wan';
+        }
+        
+        // 2. Ελέγχουμε αν η συσκευή έχει IP
+        if (!connectedDevice.ip || connectedDevice.ip === 'N/A') {
+            // Αν δεν έχει IP, ελέγχουμε αν είναι switch ή άλλη συσκευή
+            if (connectedDevice.type === 'switch' || connectedDevice.type === 'router') {
+                // Για switches/routers χωρίς IP, ελέγχουμε τις συνδέσεις τους
+                return this.determineInterfaceByConnectedDevices(router, connectedDevice);
+            }
+            return 'lan'; // Προεπιλογή
+        }
+        
+        // 3. ΕΛΕΓΧΟΣ ΜΕ ΒΑΣΗ ΤΑ ΔΙΚΤΥΑ ΤΟΥ ROUTER
+        
+        // Δημιουργία network strings για κάθε interface
+        const getNetwork = (ip, subnet) => {
+            if (!ip || ip === 'N/A') return null;
+            
+            const ipParts = ip.split('.');
+            const subnetParts = subnet.split('.');
+            
+            let network = '';
+            for (let i = 0; i < 4; i++) {
+                if (subnetParts[i] === '255') {
+                    network += ipParts[i];
+                } else {
+                    network += '0';
+                }
+                if (i < 3) network += '.';
+            }
+            return network;
+        };
+        
+        // LAN2 ελέγχος (μόνο αν είναι ενεργό)
+        if (router.interfaces.lan2 && router.interfaces.lan2.enabled) {
+            const lan2Network = getNetwork(router.interfaces.lan2.ip, router.interfaces.lan2.subnetMask);
+            const connectedNetwork = getNetwork(connectedDevice.ip, connectedDevice.subnetMask);
+            
+            if (lan2Network && connectedNetwork && lan2Network === connectedNetwork) {
+                return 'lan2';
+            }
+        }
+        
+        // LAN ελέγχος
+        if (router.interfaces.lan) {
+            const lanNetwork = getNetwork(router.interfaces.lan.ip, router.interfaces.lan.subnetMask);
+            const connectedNetwork = getNetwork(connectedDevice.ip, connectedDevice.subnetMask);
+            
+            if (lanNetwork && connectedNetwork && lanNetwork === connectedNetwork) {
+                return 'lan';
+            }
+        }
+        
+        // WAN ελέγχος (οτιδήποτε άλλο)
+        if (router.interfaces.wan) {
+            const wanNetwork = getNetwork(router.interfaces.wan.ip, router.interfaces.wan.subnetMask);
+            const connectedNetwork = getNetwork(connectedDevice.ip, connectedDevice.subnetMask);
+            
+            // Εάν η συσκευή δεν είναι στο ίδιο δίκτυο με WAN, LAN ή LAN2
+            if (!wanNetwork || wanNetwork !== connectedNetwork) {
+                return 'wan';
+            }
+        }
+        
+        // 4. ΕΙΔΙΚΗ ΠΕΡΙΠΤΩΣΗ: Routers μεταξύ τους
+        if (connectedDevice.type === 'router') {
+            // Ελέγχουμε πώς είναι συνδεδεμένοι οι routers
+            if (router.interfaces.wan && connectedDevice.ip) {
+                // Εάν το IP του άλλου router είναι στο WAN network του τρέχοντος router
+                const wanNetwork = getNetwork(router.interfaces.wan.ip, router.interfaces.wan.subnetMask);
+                const connectedNetwork = getNetwork(connectedDevice.ip, connectedDevice.subnetMask);
+                
+                if (wanNetwork && connectedNetwork && wanNetwork === connectedNetwork) {
+                    return 'wan';
+                }
+            }
+            
+            // Ελέγχουμε για LAN ή LAN2 βάσει IP
+            if (connectedDevice.ip) {
+                // LAN2
+                if (router.interfaces.lan2 && router.interfaces.lan2.enabled) {
+                    const lan2Network = getNetwork(router.interfaces.lan2.ip, router.interfaces.lan2.subnetMask);
+                    const connectedNetwork = getNetwork(connectedDevice.ip, connectedDevice.subnetMask);
+                    
+                    if (lan2Network && connectedNetwork && lan2Network === connectedNetwork) {
+                        return 'lan2';
+                    }
+                }
+                
+                // LAN
+                if (router.interfaces.lan) {
+                    const lanNetwork = getNetwork(router.interfaces.lan.ip, router.interfaces.lan.subnetMask);
+                    const connectedNetwork = getNetwork(connectedDevice.ip, connectedDevice.subnetMask);
+                    
+                    if (lanNetwork && connectedNetwork && lanNetwork === connectedNetwork) {
+                        return 'lan';
+                    }
+                }
+            }
+        }
+        
+        // Προεπιλογή: LAN
+        return 'lan';
+    };
+    
+    // Βοηθητική για switches/routers χωρίς IP
+    const determineInterfaceByConnectedDevices = (router, connectedDevice) => {
+        // Ελέγχουμε τις συσκευές που είναι συνδεδεμένες στο switch/router
+        if (connectedDevice.connections && connectedDevice.connections.length > 0) {
+            for (const connId of connectedDevice.connections) {
+                const conn = this.connectionManager.connections.find(c => c.id === connId);
+                if (!conn) continue;
+                
+                const otherId = conn.device1Id === connectedDevice.id ? conn.device2Id : conn.device1Id;
+                if (otherId === router.id) continue; // Παραλείπουμε τον ίδιο τον router
+                
+                const otherDevice = this.deviceManager.getDeviceById(otherId);
+                if (otherDevice && otherDevice.ip && otherDevice.ip !== 'N/A') {
+                    // Χρησιμοποιούμε το IP αυτής της συσκευής για να καθορίσουμε το interface
+                    return determineCorrectRouterInterface(router, otherDevice);
+                }
+            }
+        }
+        
+        return 'lan'; // Προεπιλογή
+    };
+    
+    // Αποθήκευση των βοηθητικών συναρτήσεων
+    this.determineCorrectRouterInterface = determineCorrectRouterInterface;
+    this.determineInterfaceByConnectedDevices = determineInterfaceByConnectedDevices;
+    
+    // Κύριο HTML για ρυθμίσεις router
+const mainConfigHTML = `
+    <div class="config-panel">
+        <h4><i class="fas fa-wifi"></i> Ρυθμίσεις Router</h4>
+        
+        <!-- WAN Interface -->
+        <div class="interface-settings-section wan">
+            <h5 class="interface-settings-title wan"><i class="fas fa-globe"></i> WAN Interface</h5>
+            <div class="form-group">
+                <label for="routerWanIp">WAN IP:</label>
+                <input type="text" id="routerWanIp" value="${router.interfaces.wan.ip}" placeholder="203.0.113.1">
+            </div>
+            <div class="form-group">
+                <label for="routerWanSubnet">WAN Subnet:</label>
+                <input type="text" id="routerWanSubnet" value="${router.interfaces.wan.subnetMask}" placeholder="255.255.255.0">
+            </div>
+            <div class="form-group">
+                <label for="routerWanGateway">WAN Gateway:</label>
+                <input type="text" id="routerWanGateway" value="${router.interfaces.wan.gateway}" placeholder="203.0.113.254">
+            </div>
+            <div class="form-group">
+                <label for="routerWanDns">WAN DNS:</label>
+                <input type="text" id="routerWanDns" value="${router.interfaces.wan.dns?.[0] || ''}" placeholder="8.8.8.8">
+            </div>
+        </div>
+        
+        <!-- LAN Interface -->
+        <div class="interface-settings-section lan">
+            <h5 class="interface-settings-title lan"><i class="fas fa-network-wired"></i> LAN Interface</h5>
+            <div class="form-group">
+                <label for="routerLanIp">LAN IP:</label>
+                <input type="text" id="routerLanIp" value="${router.interfaces.lan.ip}" placeholder="192.168.1.1">
+            </div>
+            <div class="form-group">
+                <label for="routerLanSubnet">LAN Subnet:</label>
+                <input type="text" id="routerLanSubnet" value="${router.interfaces.lan.subnetMask}" placeholder="255.255.255.0">
+            </div>
+            <div class="form-group">
+                <label for="routerLanGateway">LAN Gateway:</label>
+                <input type="text" id="routerLanGateway" value="${router.interfaces.lan.gateway || '0.0.0.0'}" placeholder="0.0.0.0">
+            </div>
+            <div class="form-group">
+                <label for="routerLanDns">LAN DNS:</label>
+                <input type="text" id="routerLanDns" value="${router.interfaces.lan.dns?.[0] || ''}" placeholder="192.168.1.1">
+            </div>
+        </div>
+        
+        <!-- LAN2 Interface -->
+        <div class="interface-settings-section lan2">
+            <h5 class="interface-settings-title lan2"><i class="fas fa-network-wired"></i> LAN2 Interface</h5>
+            <div class="form-group">
+                <label for="routerLan2Ip">LAN2 IP:</label>
+                <input type="text" id="routerLan2Ip" value="${router.interfaces.lan2.ip}" placeholder="192.168.2.1">
+            </div>
+            <div class="form-group">
+                <label for="routerLan2Subnet">LAN2 Subnet:</label>
+                <input type="text" id="routerLan2Subnet" value="${router.interfaces.lan2.subnetMask}" placeholder="255.255.255.0">
+            </div>
+            <div class="form-group">
+                <label for="routerLan2Gateway">LAN2 Gateway:</label>
+                <input type="text" id="routerLan2Gateway" value="${router.interfaces.lan2.gateway || '0.0.0.0'}" placeholder="0.0.0.0">
+            </div>
+            <div class="form-group">
+                <label for="routerLan2Dns">LAN2 DNS:</label>
+                <input type="text" id="routerLan2Dns" value="${router.interfaces.lan2.dns?.[0] || ''}" placeholder="192.168.2.1">
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="routerLan2Enabled" ${router.interfaces.lan2.enabled ? 'checked' : ''}>
+                    <span>LAN2 Ενεργό</span>
+                </label>
+            </div>
+        </div>
+        
+        <button class="btn btn-success update-all-btn" id="updateRouterBtn">
+            <i class="fas fa-save"></i> Ενημέρωση Όλων των Ρυθμίσεων
+        </button>
+    </div>
+`;
+
+// Συνδυασμός και επιστροφή όλου του HTML
+return interfaceConnectionsHTML + mainConfigHTML;
+}
+    
+    // Δημιουργία HTML για DNS configuration
+generateDNSConfigHTML(dnsDevice) {
+    const dnsRecords = this.dnsManager.getAllDNSRecordsForDisplay();
+    
+    let dnsRecordsHTML = '';
+    if (dnsRecords.length > 0) {
+        dnsRecordsHTML = dnsRecords.map(record => {
+            const typeClass = record.type === 'Local' ? 'local' : 
+                             record.type === 'External' ? 'external' : 'custom';
+            return `
+                <div class="dns-record-item ${typeClass}">
+                    <div class="dns-record-content">
+                        <div class="dns-record-domain">${record.domain}</div>
+                        <div class="dns-record-ip">${record.ip}</div>
+                    </div>
+                    <button class="dns-record-delete-btn" data-domain="${record.domain}">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
-                <div class="form-group">
-                    <label for="dnsGateway">Gateway:</label>
-                    <input type="text" id="dnsGateway" value="${dnsDevice.gateway}" placeholder="192.168.1.1">
+            `;
+        }).join('');
+    } else {
+        dnsRecordsHTML = '<div class="dns-empty-state"><i class="fas fa-search"></i><p>Δεν υπάρχουν DNS records</p></div>';
+    }
+    
+    return `
+        <div class="config-panel">
+            <h4><i class="fas fa-search"></i> Ρυθμίσεις DNS</h4>
+            <div class="form-group">
+                <label for="dnsIp">Διεύθυνση IP:</label>
+                <input type="text" id="dnsIp" value="${dnsDevice.ip}" placeholder="192.168.1.53">
+            </div>
+            <div class="form-group">
+                <label for="dnsGateway">Gateway:</label>
+                <input type="text" id="dnsGateway" value="${dnsDevice.gateway}" placeholder="192.168.1.1">
+            </div>
+            
+            <div class="dns-records-section">
+                <h5 class="dns-records-title">DNS Records</h5>
+                <div class="dns-records-list">
+                    ${dnsRecordsHTML}
                 </div>
                 
-                <div style="margin-top: 20px;">
-                    <h5 style="margin-bottom: 10px;">DNS Records</h5>
-                    <div style="max-height: 200px; overflow-y: auto; margin-bottom: 15px;">
-                        ${dnsRecordsHTML}
-                    </div>
-                    
-                    <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px;">
+                <div class="dns-add-record-form">
+                    <div class="dns-add-grid">
                         <div>
-                            <input type="text" id="newDnsDomain" placeholder="example.com" style="width: 100%; padding: 6px;">
+                            <input type="text" id="newDnsDomain" placeholder="example.com" class="dns-add-input">
                         </div>
                         <div>
-                            <input type="text" id="newDnsIp" placeholder="192.168.1.100" style="width: 100%; padding: 6px;">
+                            <input type="text" id="newDnsIp" placeholder="192.168.1.100" class="dns-add-input">
                         </div>
                         <div>
-                            <button class="btn btn-success" id="addDnsRecordBtn">
+                            <button class="btn btn-success dns-add-btn" id="addDnsRecordBtn">
                                 <i class="fas fa-plus"></i>
                             </button>
                         </div>
                     </div>
                 </div>
-                
-                <button class="btn btn-success" id="updateDnsBtn" style="width: 100%; margin-top: 15px;">
-                    <i class="fas fa-save"></i> Ενημέρωση
-                </button>
             </div>
-        `;
-    }
-    
+            
+            <button class="btn btn-success dns-update-btn" id="updateDnsBtn">
+                <i class="fas fa-save"></i> Ενημέρωση
+            </button>
+        </div>
+    `;
+}
     // Δημιουργία HTML για switch configuration
     generateSwitchConfigHTML(switchDevice) {
         return `
             <div class="config-panel">
-                <h4><i class="fas fa-network-wired"></i> Ρυθμίσεις Switch</h4>
+             <h4><i class="fas fa-network-wired"></i> Ρυθμίσεις Switch</h4>
                 <div class="form-group">
-                    <label for="switchIp">Διεύθυνση IP (managed):</label>
-                    <input type="text" id="switchIp" value="${switchDevice.ip}" placeholder="192.168.1.254">
+                    <label for="switchIp">Διεύθυνση IP (managed - προαιρετικά):</label>
+                    <input type="text" id="switchIp" value="${switchDevice.ip === 'N/A' ? '' : switchDevice.ip}" placeholder="192.168.1.254 ή κενό για unmanaged">
                 </div>
                 <div class="form-group">
-                    <label for="switchSubnet">Subnet Mask:</label>
-                    <input type="text" id="switchSubnet" value="${switchDevice.subnetMask}" placeholder="255.255.255.0">
+                    <label for="switchSubnet">Subnet Mask (μόνο με IP):</label>
+                    <input type="text" id="switchSubnet" value="${switchDevice.ip === 'N/A' ? '' : switchDevice.subnetMask}" placeholder="255.255.255.0">
+                </div>
+                <div class="form-group">
+                    <label for="switchGateway">Gateway (μόνο με IP):</label>
+                    <input type="text" id="switchGateway" value="${switchDevice.ip === 'N/A' ? '' : switchDevice.gateway}" placeholder="0.0.0.0">
                 </div>
                 <button class="btn btn-success" id="updateSwitchBtn" style="width: 100%;">
                     <i class="fas fa-save"></i> Ενημέρωση
                 </button>
             </div>
-        `;
+    `   ;
     }
     
     // Δημιουργία HTML για τυπική συσκευή
@@ -592,12 +891,18 @@ class UIManager {
         };
         
         // Remove device button
-        if (!safeAddListener('removeDeviceBtn', 'click', () => {
-            if (confirm(`Θέλετε να αφαιρέσετε τη συσκευή ${device.name};`)) {
-                this.removeDevice(device);
-                this.closeDevicePanel();
-            }
-        })) {
+// Remove device button
+if (!safeAddListener('removeDeviceBtn', 'click', () => {
+    if (confirm(`Θέλετε να αφαιρέσετε τη συσκευή ${device.name};`)) {
+        // ΧΡΗΣΙΜΟΠΟΙΗΣΕ ΤΟΝ deviceManager ΠΟΥ ΥΠΑΡΧΕΙ ΗΔΗ
+        if (this.deviceManager && this.deviceManager.removeDevice) {
+            this.deviceManager.removeDevice(device);
+        } else if (window.deviceManager && window.deviceManager.removeDevice) {
+            window.deviceManager.removeDevice(device);
+        }
+        this.closeDevicePanel();
+    }
+})) {
             console.warn(`[UI] removeDeviceBtn not found for ${device.name}`);
         }
         
@@ -1166,12 +1471,12 @@ class UIManager {
                     if (this.deviceManager.selectedDevice) {
                         e.preventDefault();
                         if (confirm(`Διαγραφή ${this.deviceManager.selectedDevice.name};`)) {
-                            this.removeDevice(this.deviceManager.selectedDevice);
-                            this.closeDevicePanel();
-                        }
+                        this.deviceManager.removeDevice(this.deviceManager.selectedDevice);
+                        this.closeDevicePanel();
                     }
-                    break;
-            }
+                }
+                break;
+                }
         });
     }
     
@@ -1262,32 +1567,58 @@ class UIManager {
     
     // CRUD operations
     updateRouterConfig(router) {
-        const wanIpInput = document.getElementById('routerWanIp');
-        const lanIpInput = document.getElementById('routerLanIp');
-        const subnetInput = document.getElementById('routerSubnet');
+        // Παίρνουμε όλες τις τιμές από τα πεδία
+        const wanIp = document.getElementById('routerWanIp')?.value?.trim();
+        const wanSubnet = document.getElementById('routerWanSubnet')?.value?.trim();
+        const wanGateway = document.getElementById('routerWanGateway')?.value?.trim();
+        const wanDns = document.getElementById('routerWanDns')?.value?.trim();
+        
+        const lanIp = document.getElementById('routerLanIp')?.value?.trim();
+        const lanSubnet = document.getElementById('routerLanSubnet')?.value?.trim();
+        const lanGateway = document.getElementById('routerLanGateway')?.value?.trim();
+        const lanDns = document.getElementById('routerLanDns')?.value?.trim();
+        
+        const lan2Ip = document.getElementById('routerLan2Ip')?.value?.trim();
+        const lan2Subnet = document.getElementById('routerLan2Subnet')?.value?.trim();
+        const lan2Gateway = document.getElementById('routerLan2Gateway')?.value?.trim();
+        const lan2Dns = document.getElementById('routerLan2Dns')?.value?.trim();
+        const lan2Enabled = document.getElementById('routerLan2Enabled')?.checked;
         
         console.log('[UI] Updating router config:', router.name);
         
         const configData = {
-            wanIp: wanIpInput?.value?.trim() || router.interfaces.wan.ip,
-            wanSubnet: subnetInput?.value?.trim() || router.interfaces.wan.subnetMask,
-            lanIp: lanIpInput?.value?.trim() || router.interfaces.lan.ip,
-            lanSubnet: subnetInput?.value?.trim() || router.interfaces.lan.subnetMask
+            wanIp: wanIp || router.interfaces.wan.ip,
+            wanSubnet: wanSubnet || router.interfaces.wan.subnetMask,
+            wanGateway: wanGateway || router.interfaces.wan.gateway,
+            wanDns: wanDns || router.interfaces.wan.dns?.[0],
+            
+            lanIp: lanIp || router.interfaces.lan.ip,
+            lanSubnet: lanSubnet || router.interfaces.lan.subnetMask,
+            lanGateway: lanGateway || router.interfaces.lan.gateway,
+            lanDns: lanDns || router.interfaces.lan.dns?.[0],
+            
+            lan2Ip: lan2Ip || router.interfaces.lan2.ip,
+            lan2Subnet: lan2Subnet || router.interfaces.lan2.subnetMask,
+            lan2Gateway: lan2Gateway || router.interfaces.lan2.gateway,
+            lan2Dns: lan2Dns || router.interfaces.lan2.dns?.[0],
+            lan2Enabled: lan2Enabled !== undefined ? lan2Enabled : router.interfaces.lan2.enabled
         };
         
         try {
             const result = this.deviceManager.updateRouterConfig(router, configData);
             
             if (result.success) {
+                // Ενημέρωση εμφάνισης
                 const ipElement = router.element?.querySelector('.device-ip');
                 if (ipElement) {
-                    const wanIP = router.interfaces.wan.ip || 'N/A';
-                    const lanIP = router.interfaces.lan.ip || 'N/A';
-                    ipElement.innerHTML = `WAN: ${wanIP}<br>LAN: ${lanIP}`;
+                    ipElement.innerHTML = 
+                        `WAN: ${router.interfaces.wan.ip}<br>` +
+                        `LAN: ${router.interfaces.lan.ip}<br>` +
+                        `LAN2: ${router.interfaces.lan2.ip}${router.interfaces.lan2.enabled ? '' : ' (ανενεργό)'}`;
                 }
                 
                 this.addLog(`Ενημερώθηκε ο router: ${router.name}`, 'success');
-                this.updateDeviceInfo(router);
+                setTimeout(() => this.updateDeviceInfo(router), 100);
             }
             
             return result;
@@ -1330,52 +1661,64 @@ class UIManager {
         }
     }
     
-    updateDeviceConfig(device) {
-        const ipInput = document.getElementById('deviceIp');
-        const subnetInput = document.getElementById('deviceSubnet');
-        const gatewayInput = document.getElementById('deviceGateway');
-        const dnsInput = document.getElementById('deviceDns');
-        const domainInput = document.getElementById('deviceDomain');
-        
-        console.log('[UI] Updating device config:', device.name);
-        
-        const configData = {
-            ip: ipInput?.value?.trim() || device.ip,
-            subnet: subnetInput?.value?.trim() || device.subnetMask,
-            gateway: gatewayInput?.value?.trim() || device.gateway,
-            dns: dnsInput?.value?.trim() || device.dns?.[0],
-            domainName: domainInput?.value?.trim() || device.domainName
-        };
-        
-        try {
-            let result;
-            if (device.type === 'router') {
-                result = this.deviceManager.updateRouterConfig(device, configData);
-            } else if (device.type === 'dns') {
-                result = this.deviceManager.updateStandardDeviceConfig(device, configData);
-            } else if (device.type === 'switch') {
-                result = this.deviceManager.updateStandardDeviceConfig(device, configData);
-            } else {
-                result = this.deviceManager.updateStandardDeviceConfig(device, configData);
-            }
-            
-            if (result.success) {
-                const ipElement = device.element?.querySelector('.device-ip');
-                if (ipElement && device.ip) {
-                    ipElement.textContent = device.ip;
-                }
-                
-                this.addLog(`Ενημερώθηκε η συσκευή: ${device.name}`, 'success');
-                this.updateDeviceInfo(device);
-            }
-            
-            return result;
-        } catch (error) {
-            this.addLog(`Σφάλμα: ${error.message}`, 'error');
-            return { success: false, error: error.message };
-        }
-    }
+updateDeviceConfig(device) {
+    const ipInput = document.getElementById('deviceIp') || document.getElementById('switchIp');
+    const subnetInput = document.getElementById('deviceSubnet') || document.getElementById('switchSubnet');
+    const gatewayInput = document.getElementById('deviceGateway') || document.getElementById('switchGateway');
+    const dnsInput = document.getElementById('deviceDns') || document.getElementById('switchDns');
+    const domainInput = document.getElementById('deviceDomain');
     
+    console.log('[UI] Updating device config:', device.name);
+    
+    const configData = {
+        ip: ipInput?.value?.trim() || (device.type === 'switch' ? 'N/A' : device.ip),
+        subnet: subnetInput?.value?.trim() || device.subnetMask,
+        gateway: gatewayInput?.value?.trim() || device.gateway,
+        dns: dnsInput?.value?.trim() || device.dns?.[0],
+        domainName: domainInput?.value?.trim() || device.domainName
+    };
+    
+    try {
+        let result;
+        if (device.type === 'router') {
+            result = this.deviceManager.updateRouterConfig(device, configData);
+        } else if (device.type === 'dns') {
+            result = this.deviceManager.updateStandardDeviceConfig(device, configData);
+        } else if (device.type === 'switch') {
+            // Ειδική περίπτωση για switch
+            if (!configData.ip || configData.ip === '') {
+                configData.ip = 'N/A';
+                configData.subnet = '255.255.255.0';
+                configData.gateway = '0.0.0.0';
+                configData.dns = [];
+            }
+            result = this.deviceManager.updateStandardDeviceConfig(device, configData);
+        } else {
+            result = this.deviceManager.updateStandardDeviceConfig(device, configData);
+        }
+        
+        if (result.success) {
+            const ipElement = device.element?.querySelector('.device-ip');
+            if (ipElement) {
+                if (device.type === 'switch' && device.ip === 'N/A') {
+                    ipElement.innerHTML = '<span class="no-ip">Χωρίς IP</span>';
+                    ipElement.className = 'device-ip no-ip';
+                } else if (device.ip) {
+                    ipElement.textContent = device.ip;
+                    ipElement.className = 'device-ip';
+                }
+            }
+            
+            this.addLog(`Ενημερώθηκε η συσκευή: ${device.name}`, 'success');
+            this.updateDeviceInfo(device);
+        }
+        
+        return result;
+    } catch (error) {
+        this.addLog(`Σφάλμα: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+    }
+}    
     addDNSRecordFromUI(dnsDevice) {
         try {
             const domainInput = document.getElementById('newDnsDomain');
@@ -1431,29 +1774,27 @@ class UIManager {
         return false;
     }
     
-    removeConnectionById(connId) {
-        if (typeof window.simulator !== 'undefined' && window.simulator.removeConnectionById) {
-            const result = window.simulator.removeConnectionById(connId);
-            if (result) {
-                this.addLog('Διαγράφηκε σύνδεση', 'info');
-                this.updateNetworkStats();
-            }
-            return result;
-        }
-        return null;
+removeConnectionById(connId) {
+    // 1. Βρες τη σύνδεση στον connectionManager
+    const connection = this.connectionManager.connections.find(c => c.id === connId);
+    if (!connection) return null;
+    
+    // 2. Βρες τις συσκευές
+    const device1 = this.deviceManager.getDeviceById(connection.device1Id);
+    const device2 = this.deviceManager.getDeviceById(connection.device2Id);
+    
+    // 3. Άμεση κλήση της removeConnection του connectionManager
+    const result = this.connectionManager.removeConnection(connection);
+    
+    // 4. Ενημέρωση
+    if (result && device1 && device2) {
+        this.addLog(`Διαγράφηκε σύνδεση: ${device1.name} ↔ ${device2.name}`, 'info');
+        this.updateNetworkStats();
+        this.connectionManager.updateConnectionsVisual();
     }
     
-    removeDevice(device) {
-        if (typeof window.simulator !== 'undefined' && window.simulator.removeDevice) {
-            const result = window.simulator.removeDevice(device);
-            if (result) {
-                this.addLog(`Αφαιρέθηκε συσκευή: ${device.name}`, 'info');
-                this.updateNetworkStats();
-            }
-            return result;
-        }
-        return null;
-    }
+    return result;
+}
     
     // Global functions
     testPingBetweenDevices() {
