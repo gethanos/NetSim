@@ -99,9 +99,9 @@ class DeviceManager {
         return device;
     }
     
-    // Δημιουργία Router συσκευής - ΔΙΟΡΘΩΜΕΝΟ ΜΕ connectionInterfaces
+    // Δημιουργία Router συσκευής - ΣΥΜΒΑΤΗ ΜΕ ΚΑΙ ΤΑ ΔΥΟ (lan ΚΑΙ lan1/lan2)
     createRouterDevice(deviceId, type, deviceName, x, y, element) {
-        return {
+        const router = {
             id: deviceId,
             type: type,
             name: deviceName,
@@ -112,15 +112,22 @@ class DeviceManager {
                     gateway: '0.0.0.0',
                     dns: ['8.8.8.8']
                 },
+                // ΠΑΡΑΚΑΤΩ: Κρατάμε και το παλιό 'lan' ΓΙΑ ΣΥΜΒΑΤΟΤΗΤΑ
                 lan: { 
                     ip: '192.168.1.1', 
                     subnetMask: '255.255.255.0', 
                     gateway: '0.0.0.0',
                     dns: ['192.168.1.1']
+                },
+                lan2: { 
+                    ip: '192.168.2.1', 
+                    subnetMask: '255.255.255.0', 
+                    gateway: '0.0.0.0',
+                    dns: ['192.168.2.1'],
+                    enabled: true
                 }
             },
-            // ΝΕΟ: Χαρτογράφηση συνδέσεων με interfaces - ΚΡΙΤΙΚΟ ΣΗΜΕΙΟ!
-            connectionInterfaces: {}, // { connectionId: 'wan' ή 'lan' }
+            connectionInterfaces: {},
             routingTable: [],
             x: x,
             y: y,
@@ -129,6 +136,8 @@ class DeviceManager {
             status: 'online',
             isGateway: true
         };
+                
+        return router;
     }
     
     // Δημιουργία Switch συσκευής
@@ -346,7 +355,7 @@ class DeviceManager {
     // Βοηθητικές συναρτήσεις
     getDefaultIPDisplay(type) {
         switch(type) {
-            case 'router': return 'WAN: N/A<br>LAN: 192.168.1.1';
+            case 'router': return 'WAN: N/A<br>LAN: 192.168.1.1<br>LAN2: 192.168.2.1';  // Προσθήκη LAN2
             case 'switch': return '<span class="no-ip">Χωρίς IP</span>';
             case 'cloud': return '8.8.8.8';
             case 'dns': return '192.168.1.53';
@@ -374,16 +383,18 @@ class DeviceManager {
         return this.devices.find(d => d.id === id);
     }
     
-    // Βρείτε συσκευή με βάση το IP
+    // Βρείτε συσκευή με βάση το IP - ΕΠΕΚΤΑΣΗ ΓΙΑ 2 LAN
     getDeviceByIP(ip) {
         if (!ip || ip === 'N/A' || ip === '0.0.0.0') return null;
         
         // Έλεγχος για routers πρώτα (έχουν πολλαπλές διεπαφές)
         for (const device of this.devices) {
             if (device.type === 'router') {
-                if (device.interfaces.lan.ip === ip || device.interfaces.wan.ip === ip) {
-                    return device;
-                }
+                // Ελέγχουμε όλα τα interfaces
+                if (device.interfaces.wan.ip === ip) return device;
+                if (device.interfaces.lan.ip === ip) return device;
+                if (device.interfaces.lan1 && device.interfaces.lan1.ip === ip) return device;
+                if (device.interfaces.lan2 && device.interfaces.lan2.ip === ip) return device;
             } else if (device.ip === ip) {
                 return device;
             }
@@ -483,328 +494,353 @@ class DeviceManager {
         }
     }
     
-    // Ενημέρωση router - ΜΕ ΑΠΛΟΥΣ ΕΛΕΓΧΟΥΣ
+    // Ενημέρωση router - ΕΠΕΚΤΑΣΗ ΓΙΑ ΟΛΑ ΤΑ INTERFACES
     updateRouterConfig(router, configData) {
-        const { wanIp, wanSubnet, wanGateway, wanDns, lanIp, lanSubnet, lanDns } = configData;
+        const { 
+            wanIp, wanSubnet, wanGateway, wanDns, 
+            lanIp, lanSubnet, lanGateway, lanDns,
+            lan2Ip, lan2Subnet, lan2Gateway, lan2Dns, lan2Enabled 
+        } = configData;
         
-        // WAN Interface - ΑΠΛΟΣ ΕΛΕΓΧΟΣ
-        if (wanIp && wanIp !== 'N/A') {
-            if (!this.simpleIPCheck(wanIp)) {
-                throw new Error('Λάθος WAN IP: Κάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.1)');
+        // WAN Interface
+        if (wanIp !== undefined) {
+            if (wanIp && wanIp !== 'N/A') {
+                if (!this.simpleIPCheck(wanIp)) {
+                    throw new Error('Λάθος WAN IP: Κάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.1)');
+                }
+                router.interfaces.wan.ip = wanIp;
             }
-            router.interfaces.wan.ip = wanIp;
         }
         
-        if (wanSubnet) {
-            if (!this.simpleSubnetCheck(wanSubnet)) {
-                throw new Error('Λάθος WAN Subnet: Μη έγκυρη μάσκα (π.χ. 255.255.255.0)');
+        if (wanSubnet !== undefined) {
+            if (wanSubnet) {
+                if (!this.simpleSubnetCheck(wanSubnet)) {
+                    throw new Error('Λάθος WAN Subnet: Μη έγκυρη μάσκα (π.χ. 255.255.255.0)');
+                }
+                router.interfaces.wan.subnetMask = wanSubnet;
             }
-            router.interfaces.wan.subnetMask = wanSubnet;
         }
         
-        if (wanGateway && wanGateway !== '0.0.0.0') {
-            if (!this.simpleIPCheck(wanGateway)) {
-                throw new Error('Λάθος WAN Gateway: Κάθε αριθμός πρέπει να είναι 0-255');
+        if (wanGateway !== undefined) {
+            if (wanGateway && wanGateway !== '0.0.0.0') {
+                if (!this.simpleIPCheck(wanGateway)) {
+                    throw new Error('Λάθος WAN Gateway: Κάθε αριθμός πρέπει να είναι 0-255');
+                }
+                router.interfaces.wan.gateway = wanGateway;
             }
-            router.interfaces.wan.gateway = wanGateway;
         }
         
-        if (wanDns && wanDns !== '0.0.0.0') {
-            if (!this.simpleIPCheck(wanDns)) {
-                throw new Error('Λάθος WAN DNS: Κάθε αριθμός πρέπει να είναι 0-255');
+        if (wanDns !== undefined) {
+            if (wanDns && wanDns !== '0.0.0.0') {
+                if (!this.simpleIPCheck(wanDns)) {
+                    throw new Error('Λάθος WAN DNS: Κάθε αριθμός πρέπει να είναι 0-255');
+                }
+                router.interfaces.wan.dns = [wanDns];
             }
-            router.interfaces.wan.dns = [wanDns];
         }
         
-        // LAN Interface - ΑΠΛΟΣ ΕΛΕΓΧΟΣ
-        if (lanIp && lanIp !== 'N/A') {
-            if (!this.simpleIPCheck(lanIp)) {
-                throw new Error('Λάθος LAN IP: Κάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.1)');
+        // LAN Interface - ΣΥΝΧΡΟΝΙΖΟΥΜΕ ΚΑΙ ΤΑ ΔΥΟ (lan και lan1)
+        if (lanIp !== undefined) {
+            if (lanIp && lanIp !== 'N/A') {
+                if (!this.simpleIPCheck(lanIp)) {
+                    throw new Error('Λάθος LAN IP: Κάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.1)');
+                }
+                router.interfaces.lan.ip = lanIp;
+                if (router.interfaces.lan1) {
+                    router.interfaces.lan1.ip = lanIp;
+                }
             }
-            router.interfaces.lan.ip = lanIp;
         }
         
-        if (lanSubnet) {
-            if (!this.simpleSubnetCheck(lanSubnet)) {
-                throw new Error('Λάθος LAN Subnet: Μη έγκυρη μάσκα (π.χ. 255.255.255.0)');
+        if (lanSubnet !== undefined) {
+            if (lanSubnet) {
+                if (!this.simpleSubnetCheck(lanSubnet)) {
+                    throw new Error('Λάθος LAN Subnet: Μη έγκυρη μάσκα (π.χ. 255.255.255.0)');
+                }
+                router.interfaces.lan.subnetMask = lanSubnet;
+                if (router.interfaces.lan1) {
+                    router.interfaces.lan1.subnetMask = lanSubnet;
+                }
             }
-            router.interfaces.lan.subnetMask = lanSubnet;
         }
         
-        if (lanDns && lanDns !== '0.0.0.0') {
-            if (!this.simpleIPCheck(lanDns)) {
-                throw new Error('Λάθος LAN DNS: Κάθε αριθμός πρέπει να είναι 0-255');
+        if (lanGateway !== undefined) {
+            if (lanGateway && lanGateway !== '0.0.0.0') {
+                if (!this.simpleIPCheck(lanGateway)) {
+                    throw new Error('Λάθος LAN Gateway: Κάθε αριθμός πρέπει να είναι 0-255');
+                }
+                router.interfaces.lan.gateway = lanGateway;
+                if (router.interfaces.lan1) {
+                    router.interfaces.lan1.gateway = lanGateway;
+                }
             }
-            router.interfaces.lan.dns = [lanDns];
+        }
+        
+        if (lanDns !== undefined) {
+            if (lanDns && lanDns !== '0.0.0.0') {
+                if (!this.simpleIPCheck(lanDns)) {
+                    throw new Error('Λάθος LAN DNS: Κάθε αριθμός πρέπει να είναι 0-255');
+                }
+                router.interfaces.lan.dns = [lanDns];
+                if (router.interfaces.lan1) {
+                    router.interfaces.lan1.dns = [lanDns];
+                }
+            }
+        }
+        
+        // LAN2 Interface
+        if (lan2Ip !== undefined && lan2Ip !== 'N/A') {
+            if (!this.simpleIPCheck(lan2Ip)) {
+                throw new Error('Λάθος LAN2 IP: Κάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.2.1)');
+            }
+            router.interfaces.lan2.ip = lan2Ip;
+        }
+        
+        if (lan2Subnet !== undefined) {
+            if (lan2Subnet) {
+                if (!this.simpleSubnetCheck(lan2Subnet)) {
+                    throw new Error('Λάθος LAN2 Subnet: Μη έγκυρη μάσκα (π.χ. 255.255.255.0)');
+                }
+                router.interfaces.lan2.subnetMask = lan2Subnet;
+            }
+        }
+        
+        if (lan2Gateway !== undefined) {
+            if (lan2Gateway && lan2Gateway !== '0.0.0.0') {
+                if (!this.simpleIPCheck(lan2Gateway)) {
+                    throw new Error('Λάθος LAN2 Gateway: Κάθε αριθμός πρέπει να είναι 0-255');
+                }
+                router.interfaces.lan2.gateway = lan2Gateway;
+            }
+        }
+        
+        if (lan2Dns !== undefined && lan2Dns !== '0.0.0.0') {
+            if (!this.simpleIPCheck(lan2Dns)) {
+                throw new Error('Λάθος LAN2 DNS: Κάθε αριθμός πρέπει να είναι 0-255');
+            }
+            router.interfaces.lan2.dns = [lan2Dns];
+        }
+        
+        if (lan2Enabled !== undefined) {
+            router.interfaces.lan2.enabled = lan2Enabled;
         }
         
         // Ενημέρωση εμφάνισης
-        router.element.querySelector('.device-ip').innerHTML = `WAN: ${router.interfaces.wan.ip}<br>LAN: ${router.interfaces.lan.ip}`;
+        router.element.querySelector('.device-ip').innerHTML = 
+            `WAN: ${router.interfaces.wan.ip}<br>` +
+            `LAN: ${router.interfaces.lan.ip}<br>` +
+            `LAN2: ${router.interfaces.lan2.ip}${router.interfaces.lan2.enabled ? '' : ' (ανενεργό)'}`;
         
         return { success: true, router };
     }
     
-    // Ενημέρωση τυπικής συσκευής - ΜΕ ΑΠΛΟΥΣ ΕΛΕΓΧΟΥΣ
-    updateStandardDeviceConfig(device, configData) {
-        const { ip, subnet, gateway, dns, domainName } = configData;
-        
-        // Ειδική περίπτωση για switches χωρίς IP
-        if (device.type === 'switch' && ip === 'N/A') {
+    // Ενημέρωση τυπικής συσκευής
+// Ενημέρωση τυπικής συσκευής
+updateStandardDeviceConfig(device, configData) {
+    const { ip, subnet, gateway, dns, domainName } = configData;
+    
+    // Ειδική περίπτωση για switches χωρίς IP
+    if (device.type === 'switch') {
+        if (ip === 'N/A' || ip === '' || !ip) {
             device.ip = 'N/A';
-            device.element.querySelector('.device-ip').textContent = 'Χωρίς IP';
-            device.element.querySelector('.device-ip').className = 'device-ip no-ip';
+            device.subnetMask = '255.255.255.0';
+            device.gateway = '0.0.0.0';
+            device.dns = [];
+            
+            if (device.element) {
+                device.element.querySelector('.device-ip').innerHTML = '<span class="no-ip">Χωρίς IP</span>';
+                device.element.querySelector('.device-ip').className = 'device-ip no-ip';
+            }
+            
             return { success: true, device };
         }
+    }
+    
+    // ΑΠΛΟΣ ΕΛΕΓΧΟΣ IP
+    if (ip && ip !== 'N/A') {
+        if (!this.simpleIPCheck(ip)) {
+            throw new Error('Λάθος IP: Κάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.10)');
+        }
+        device.ip = ip;
         
-        // ΑΠΛΟΣ ΕΛΕΓΧΟΣ IP
-        if (ip && ip !== 'N/A') {
-            if (!this.simpleIPCheck(ip)) {
-                throw new Error('Λάθος IP: Κάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.10)');
-            }
-            device.ip = ip;
+        if (device.element) {
             device.element.querySelector('.device-ip').textContent = ip;
             device.element.querySelector('.device-ip').className = 'device-ip';
         }
-        
-        // ΑΠΛΟΣ ΕΛΕΓΧΟΣ Subnet
-        if (subnet) {
-            if (!this.simpleSubnetCheck(subnet)) {
-                throw new Error('Λάθος Subnet: Μη έγκυρη μάσκα (π.χ. 255.255.255.0)');
-            }
-            device.subnetMask = subnet;
-        }
-        
-        // ΑΠΛΟΣ ΕΛΕΓΧΟΣ Gateway
-        if (gateway && gateway !== '0.0.0.0') {
-            if (!this.simpleIPCheck(gateway)) {
-                throw new Error('Λάθος Gateway: Κάθε αριθμός πρέπει να είναι 0-255');
-            }
-            device.gateway = gateway;
-        }
-        
-        // ΑΠΛΟΣ ΕΛΕΓΧΟΣ DNS
-        if (dns && dns !== '0.0.0.0') {
-            if (!this.simpleIPCheck(dns)) {
-                throw new Error('Λάθος DNS: Κάθε αριθμός πρέπει να είναι 0-255');
-            }
-            device.dns = [dns];
-        }
-        
-        if (domainName && domainName.trim() !== '') {
-            device.domainName = domainName;
-            
-            // Προσθήκη στο DNS manager
-            if (typeof window.dnsManager !== 'undefined' && device.ip && device.ip !== 'N/A') {
-                window.dnsManager.addDNSRecord(domainName, device.ip);
-            }
-        }
-        
-        return { success: true, device };
     }
     
-    // Βοηθητική συνάρτηση για ενημέρωση από UI - ΔΙΟΡΘΩΜΕΝΗ ΜΕ ΠΡΑΓΜΑΤΙΚΗ VALIDATION
-    updateDeviceConfigFromUI(device) {
-        let configData = {};
+    // ΑΠΛΟΣ ΕΛΕΓΧΟΣ Subnet
+    if (subnet) {
+        if (!this.simpleSubnetCheck(subnet)) {
+            throw new Error('Λάθος Subnet: Μη έγκυρη μάσκα (π.χ. 255.255.255.0)');
+        }
+        device.subnetMask = subnet;
+    }
+    
+    // ΑΠΛΟΣ ΕΛΕΓΧΟΣ Gateway
+    if (gateway && gateway !== '0.0.0.0') {
+        if (!this.simpleIPCheck(gateway)) {
+            throw new Error('Λάθος Gateway: Κάθε αριθμός πρέπει να είναι 0-255');
+        }
+        device.gateway = gateway;
+    }
+    
+    // ΑΠΛΟΣ ΕΛΕΓΧΟΣ DNS
+    if (dns && dns !== '0.0.0.0') {
+        if (!this.simpleIPCheck(dns)) {
+            throw new Error('Λάθος DNS: Κάθε αριθμός πρέπει να είναι 0-255');
+        }
+        device.dns = [dns];
+    }
+    
+    if (domainName && domainName.trim() !== '') {
+        device.domainName = domainName;
         
-        // Helper function to safely get value without errors
-        const getValue = (id, defaultValue) => {
-            try {
-                const element = document.getElementById(id);
-                return element && element.value !== undefined ? element.value : defaultValue;
-            } catch (e) {
-                return defaultValue;
-            }
+        // Προσθήκη στο DNS manager
+        if (typeof window.dnsManager !== 'undefined' && device.ip && device.ip !== 'N/A') {
+            window.dnsManager.addDNSRecord(domainName, device.ip);
+        }
+    }
+    
+    return { success: true, device };
+}    
+// Βοηθητική συνάρτηση για ενημέρωση από UI
+updateDeviceConfigFromUI(device) {
+    let configData = {};
+    
+    // Helper function to safely get value without errors
+    const getValue = (id, defaultValue) => {
+        try {
+            const element = document.getElementById(id);
+            return element && element.value !== undefined ? element.value : defaultValue;
+        } catch (e) {
+            return defaultValue;
+        }
+    };
+    
+    if (device.type === 'router') {
+        configData = {
+            wanIp: getValue('routerWanIp', device.interfaces?.wan?.ip || 'N/A'),
+            wanSubnet: getValue('routerWanSubnet', device.interfaces?.wan?.subnetMask || '255.255.255.0'),
+            wanGateway: getValue('routerWanGateway', device.interfaces?.wan?.gateway || '0.0.0.0'),
+            wanDns: getValue('routerWanDns', device.interfaces?.wan?.dns?.[0] || '8.8.8.8'),
+            lanIp: getValue('routerLanIp', device.interfaces?.lan?.ip || '192.168.1.1'),
+            lanSubnet: getValue('routerLanSubnet', device.interfaces?.lan?.subnetMask || '255.255.255.0'),
+            lanGateway: getValue('routerLanGateway', device.interfaces?.lan?.gateway || '0.0.0.0'),
+            lanDns: getValue('routerLanDns', device.interfaces?.lan?.dns?.[0] || device.interfaces?.lan?.ip || '192.168.1.1'),
+            lan2Ip: getValue('routerLan2Ip', device.interfaces?.lan2?.ip || '192.168.2.1'),
+            lan2Subnet: getValue('routerLan2Subnet', device.interfaces?.lan2?.subnetMask || '255.255.255.0'),
+            lan2Gateway: getValue('routerLan2Gateway', device.interfaces?.lan2?.gateway || '0.0.0.0'),
+            lan2Dns: getValue('routerLan2Dns', device.interfaces?.lan2?.dns?.[0] || device.interfaces?.lan2?.ip || '192.168.2.1'),
+            lan2Enabled: document.getElementById('routerLan2Enabled')?.checked ?? device.interfaces?.lan2?.enabled ?? true
         };
         
-        if (device.type === 'router') {
+        console.log('[DeviceManager] Router config from UI:', configData);
+        
+    } else if (device.type === 'dns') {
+        configData = {
+            ip: getValue('dnsIp', device.ip || '192.168.1.53'),
+            subnet: getValue('dnsSubnet', device.subnetMask || '255.255.255.0'),
+            gateway: getValue('dnsGateway', device.gateway || '192.168.1.1'),
+            dns: getValue('deviceDns', device.dns?.[0] || device.ip || '192.168.1.53')
+        };
+        
+    } else if (device.type === 'switch') {
+        const switchIp = getValue('switchIp', device.ip || 'N/A');
+        
+        // Ειδική λογική για switches
+        if (switchIp === '' || switchIp === 'N/A' || !switchIp) {
+            // Unmanaged switch - χωρίς IP
             configData = {
-                wanIp: getValue('routerWanIp', device.interfaces?.wan?.ip || 'N/A'),
-                wanSubnet: getValue('routerSubnet', device.interfaces?.wan?.subnetMask || '255.255.255.0'),
-                wanGateway: getValue('routerGateway', device.interfaces?.wan?.gateway || '0.0.0.0'),
-                wanDns: getValue('wanDns', device.interfaces?.wan?.dns?.[0] || '8.8.8.8'),
-                lanIp: getValue('routerLanIp', device.interfaces?.lan?.ip || '192.168.1.1'),
-                lanSubnet: getValue('routerSubnet', device.interfaces?.lan?.subnetMask || '255.255.255.0'),
-                lanDns: getValue('lanDns', device.interfaces?.lan?.dns?.[0] || device.interfaces?.lan?.ip || '192.168.1.1')
+                ip: 'N/A',
+                subnet: '255.255.255.0',
+                gateway: '0.0.0.0',
+                dns: []
             };
-            
-            // ΕΛΕΓΧΟΣ: WAN IP
-            if (configData.wanIp && configData.wanIp !== 'N/A') {
-                if (!this.simpleIPCheck(configData.wanIp)) {
-                    alert(`Λάθος WAN IP: ${configData.wanIp}\nΚάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.1)`);
-                    return { success: false, error: 'Λάθος WAN IP' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: LAN IP
-            if (configData.lanIp && configData.lanIp !== 'N/A') {
-                if (!this.simpleIPCheck(configData.lanIp)) {
-                    alert(`Λάθος LAN IP: ${configData.lanIp}\nΚάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.1)`);
-                    return { success: false, error: 'Λάθος LAN IP' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: SUBNET
-            if (configData.wanSubnet && !this.simpleSubnetCheck(configData.wanSubnet)) {
-                alert(`Λάθος Subnet Mask: ${configData.wanSubnet}\nΜη έγκυρη μάσκα (π.χ. 255.255.255.0)`);
-                return { success: false, error: 'Λάθος Subnet Mask' };
-            }
-            
-            // ΕΛΕΓΧΟΣ: WAN GATEWAY
-            if (configData.wanGateway && configData.wanGateway !== '0.0.0.0') {
-                if (!this.simpleIPCheck(configData.wanGateway)) {
-                    alert(`Λάθος WAN Gateway: ${configData.wanGateway}\nΚάθε αριθμός πρέπει να είναι 0-255`);
-                    return { success: false, error: 'Λάθος WAN Gateway' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: WAN DNS
-            if (configData.wanDns && configData.wanDns !== '0.0.0.0') {
-                if (!this.simpleIPCheck(configData.wanDns)) {
-                    alert(`Λάθος WAN DNS: ${configData.wanDns}\nΚάθε αριθμός πρέπει να είναι 0-255`);
-                    return { success: false, error: 'Λάθος WAN DNS' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: LAN DNS
-            if (configData.lanDns && configData.lanDns !== '0.0.0.0') {
-                if (!this.simpleIPCheck(configData.lanDns)) {
-                    alert(`Λάθος LAN DNS: ${configData.lanDns}\nΚάθε αριθμός πρέπει να είναι 0-255`);
-                    return { success: false, error: 'Λάθος LAN DNS' };
-                }
-            }
-            
-        } else if (device.type === 'dns') {
+        } else {
+            // Managed switch - με IP
             configData = {
-                ip: getValue('dnsIp', device.ip || '192.168.1.53'),
-                subnet: getValue('dnsSubnet', device.subnetMask || '255.255.255.0'),
-                gateway: getValue('dnsGateway', device.gateway || '192.168.1.1'),
-                dns: getValue('deviceDns', device.dns?.[0] || device.ip || '192.168.1.53')
-            };
-            
-            // ΕΛΕΓΧΟΣ: IP
-            if (configData.ip && configData.ip !== 'N/A') {
-                if (!this.simpleIPCheck(configData.ip)) {
-                    alert(`Λάθος DNS IP: ${configData.ip}\nΚάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.53)`);
-                    return { success: false, error: 'Λάθος DNS IP' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: SUBNET
-            if (configData.subnet && !this.simpleSubnetCheck(configData.subnet)) {
-                alert(`Λάθος Subnet Mask: ${configData.subnet}\nΜη έγκυρη μάσκα (π.χ. 255.255.255.0)`);
-                return { success: false, error: 'Λάθος Subnet Mask' };
-            }
-            
-            // ΕΛΕΓΧΟΣ: GATEWAY
-            if (configData.gateway && configData.gateway !== '0.0.0.0') {
-                if (!this.simpleIPCheck(configData.gateway)) {
-                    alert(`Λάθος Gateway: ${configData.gateway}\nΚάθε αριθμός πρέπει να είναι 0-255`);
-                    return { success: false, error: 'Λάθος Gateway' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: DNS
-            if (configData.dns && configData.dns !== '0.0.0.0') {
-                if (!this.simpleIPCheck(configData.dns)) {
-                    alert(`Λάθος DNS: ${configData.dns}\nΚάθε αριθμός πρέπει να είναι 0-255`);
-                    return { success: false, error: 'Λάθος DNS' };
-                }
-            }
-            
-        } else if (device.type === 'switch') {
-            configData = {
-                ip: getValue('switchIp', device.ip || 'N/A'),
+                ip: switchIp,
                 subnet: getValue('switchSubnet', device.subnetMask || '255.255.255.0'),
                 gateway: getValue('switchGateway', device.gateway || '0.0.0.0'),
                 dns: getValue('switchDns', device.dns?.[0] || '8.8.8.8')
             };
-            
-            // ΕΛΕΓΧΟΣ: IP (μόνο αν δεν είναι N/A)
-            if (configData.ip && configData.ip !== 'N/A') {
-                if (!this.simpleIPCheck(configData.ip)) {
-                    alert(`Λάθος Switch IP: ${configData.ip}\nΚάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.254)`);
-                    return { success: false, error: 'Λάθος Switch IP' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: SUBNET
-            if (configData.subnet && !this.simpleSubnetCheck(configData.subnet)) {
-                alert(`Λάθος Subnet Mask: ${configData.subnet}\nΜη έγκυρη μάσκα (π.χ. 255.255.255.0)`);
-                return { success: false, error: 'Λάθος Subnet Mask' };
-            }
-            
-            // ΕΛΕΓΧΟΣ: GATEWAY
-            if (configData.gateway && configData.gateway !== '0.0.0.0') {
-                if (!this.simpleIPCheck(configData.gateway)) {
-                    alert(`Λάθος Gateway: ${configData.gateway}\nΚάθε αριθμός πρέπει να είναι 0-255`);
-                    return { success: false, error: 'Λάθος Gateway' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: DNS
-            if (configData.dns && configData.dns !== '0.0.0.0') {
-                if (!this.simpleIPCheck(configData.dns)) {
-                    alert(`Λάθος DNS: ${configData.dns}\nΚάθε αριθμός πρέπει να είναι 0-255`);
-                    return { success: false, error: 'Λάθος DNS' };
-                }
-            }
-            
-        } else {
-            configData = {
-                ip: getValue('deviceIp', device.ip || '192.168.1.x'),
-                subnet: getValue('deviceSubnet', device.subnetMask || '255.255.255.0'),
-                gateway: getValue('deviceGateway', device.gateway || '0.0.0.0'),
-                dns: getValue('deviceDns', device.dns?.[0] || '8.8.8.8'),
-                domainName: getValue('deviceDomain', device.domainName || '')
-            };
-            
-            // ΕΛΕΓΧΟΣ: IP
-            if (configData.ip && configData.ip !== 'N/A') {
-                if (!this.simpleIPCheck(configData.ip)) {
-                    alert(`Λάθος IP: ${configData.ip}\nΚάθε αριθμός πρέπει να είναι 0-255 (π.χ. 192.168.1.10)`);
-                    return { success: false, error: 'Λάθος IP' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: SUBNET
-            if (configData.subnet && !this.simpleSubnetCheck(configData.subnet)) {
-                alert(`Λάθος Subnet Mask: ${configData.subnet}\nΜη έγκυρη μάσκα (π.χ. 255.255.255.0)`);
-                return { success: false, error: 'Λάθος Subnet Mask' };
-            }
-            
-            // ΕΛΕΓΧΟΣ: GATEWAY
-            if (configData.gateway && configData.gateway !== '0.0.0.0') {
-                if (!this.simpleIPCheck(configData.gateway)) {
-                    alert(`Λάθος Gateway: ${configData.gateway}\nΚάθε αριθμός πρέπει να είναι 0-255`);
-                    return { success: false, error: 'Λάθος Gateway' };
-                }
-            }
-            
-            // ΕΛΕΓΧΟΣ: DNS
-            if (configData.dns && configData.dns !== '0.0.0.0') {
-                if (!this.simpleIPCheck(configData.dns)) {
-                    alert(`Λάθος DNS: ${configData.dns}\nΚάθε αριθμός πρέπει να είναι 0-255`);
-                    return { success: false, error: 'Λάθος DNS' };
-                }
-            }
         }
         
-        // ΜΟΝΟ ΕΔΩ: Αν όλοι οι έλεγχοι πέρασαν, αποθήκευσε
-        try {
-            const result = this.updateDeviceConfig(device, configData);
+        console.log('[DeviceManager] Switch config from UI:', configData);
+        
+    } else {
+        // Standard devices (computer, server, printer, cloud)
+        configData = {
+            ip: getValue('deviceIp', device.ip || '192.168.1.x'),
+            subnet: getValue('deviceSubnet', device.subnetMask || '255.255.255.0'),
+            gateway: getValue('deviceGateway', device.gateway || '0.0.0.0'),
+            dns: getValue('deviceDns', device.dns?.[0] || '8.8.8.8'),
+            domainName: getValue('deviceDomain', device.domainName || '')
+        };
+        
+        console.log('[DeviceManager] Standard device config from UI:', configData);
+    }
+    
+    // ΜΟΝΟ ΕΔΩ: Αν όλοι οι έλεγχοι πέρασαν, αποθήκευσε
+    try {
+        const result = this.updateDeviceConfig(device, configData);
+        
+        if (result.success) {
+            // Εμφάνιση μηνύματος επιτυχίας
+            setTimeout(() => {
+                alert(`Ενημερώθηκαν επιτυχώς οι ρυθμίσεις για ${device.name}`);
+            }, 100);
+        }
+        
+        return result;
+    } catch (error) {
+        alert(`Σφάλμα: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}    
+    // ΝΕΑ ΜΕΘΟΔΟΣ: Ανάθεση συσκευής σε LAN2
+    assignToLAN2(device) {
+        if (device.type === 'router') return false;
+        
+        // Βρες router με LAN2
+        const router = this.devices.find(d => d.type === 'router');
+        if (!router || !router.interfaces.lan2 || !router.interfaces.lan2.enabled) {
+            return false;
+        }
+        
+        // Ορισμός IP στο δίκτυο LAN2
+        const lan2IP = router.interfaces.lan2.ip;
+        const subnetParts = lan2IP.split('.');
+        const baseNetwork = subnetParts.slice(0, 3).join('.');
+        
+        // Δημιουργία IP στο LAN2 (π.χ. 192.168.2.x)
+        let lastOctet = 10;
+        let attempts = 0;
+        
+        while (attempts < 100) {
+            const potentialIP = `${baseNetwork}.${lastOctet}`;
+            const existingDevice = this.getDeviceByIP(potentialIP);
             
-            if (result.success) {
-                // Εμφάνιση μηνύματος επιτυχίας
-                setTimeout(() => {
-                    alert(`Ενημερώθηκαν επιτυχώς οι ρυθμίσεις για ${device.name}`);
-                }, 100);
+            if (!existingDevice) {
+                device.ip = potentialIP;
+                device.subnetMask = router.interfaces.lan2.subnetMask;
+                device.gateway = router.interfaces.lan2.ip;
+                device.dns = router.interfaces.lan2.dns;
+                
+                // Ενημέρωση εμφάνισης
+                if (device.element) {
+                    device.element.querySelector('.device-ip').textContent = potentialIP;
+                }
+                
+                return true;
             }
             
-            return result;
-        } catch (error) {
-            alert(`Σφάλμα: ${error.message}`);
-            return { success: false, error: error.message };
+            lastOctet++;
+            attempts++;
         }
+        
+        return false;
     }
 }
 
